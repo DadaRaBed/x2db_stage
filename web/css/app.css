@@ -1,0 +1,9 @@
+h1 {
+    margin-top: 0;
+    font-size: 32px;
+}
+
+p {
+    color: var(--color-muted);
+    line-height: 1.6;
+}

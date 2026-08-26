@@ -1,0 +1,1655 @@
+<!doctype html>
+<html lang="fr" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Data Manager - Expert Edition</title>
+    <link rel="stylesheet" href="css/style.css" />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+    />
+    <style>
+      html,
+      body {
+        width: 100vw;
+        height: 100vh;
+        margin: 0;
+        padding: 0;
+        overflow: auto; /* ✅ Changé de 'hidden' à 'auto' pour restaurer le scrollbar global */
+      }
+      .app-container {
+        width: 100% !important;
+        max-width: 100% !important;
+        min-height: 100vh;
+        margin: 0 !important;
+        padding: 0 !important;
+        border: none !important;
+        box-shadow: none !important;
+      }
+      .dashboard-layout {
+        width: 100%;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+      .dashboard-content {
+        flex: 1;
+        width: 100%;
+        max-width: 100% !important;
+        padding: 2rem 3rem !important;
+        box-sizing: border-box;
+      }
+      #notification-container {
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        z-index: 999999;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        max-width: 350px;
+        width: 100%;
+      }
+      .notification {
+        background: rgba(15, 23, 42, 0.9);
+        color: #ffffff;
+        padding: 14px 18px;
+        border-radius: 8px;
+        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+        backdrop-filter: blur(8px);
+        font-size: 0.9rem;
+      }
+      .notification-success {
+        border-left: 4px solid #27ae60;
+      }
+      .notification-error {
+        border-left: 4px solid #e74c3c;
+      }
+      .hidden {
+        display: none !important;
+      }
+      .duplicates-table-wrapper {
+        overflow-x: auto;
+        overflow-y: auto;
+        max-height: 420px;
+        border-radius: 6px;
+        border: 1px solid var(--border-color, #e2e8f0);
+      }
+      .duplicates-table-wrapper table {
+        width: 100%;
+        min-width: 900px;
+        border-collapse: collapse;
+        font-size: 0.85rem;
+        background: var(--bg-container, #fff);
+      }
+      .duplicates-table-wrapper thead {
+        background: var(--bg-secondary, #f1f5f9);
+        border-bottom: 2px solid var(--border-color, #cbd5e1);
+        position: sticky;
+        top: 0;
+        z-index: 3;
+      }
+      .duplicates-table-wrapper th {
+        padding: 0.6rem 0.8rem;
+        text-align: left;
+        font-weight: 600;
+        color: var(--text-secondary, #334155);
+        white-space: nowrap;
+        background: var(--bg-secondary, #f1f5f9);
+        border-right: 1px solid var(--border-light, #e2e8f0);
+        min-width: 120px;
+      }
+      .duplicates-table-wrapper td {
+        padding: 0.5rem 0.8rem;
+        border-bottom: 1px solid var(--border-light, #e2e8f0);
+        color: var(--text-secondary, #334155);
+        vertical-align: top;
+        border-right: 1px solid var(--border-light, #e2e8f0);
+        min-width: 120px;
+        max-width: 300px;
+        word-break: break-word;
+      }
+      .duplicates-table-wrapper tr:hover td {
+        background: var(--bg-hover, #f1f5f9);
+      }
+      .duplicates-table-wrapper .dup-col-doublon {
+        color: #e74c3c;
+        font-weight: 600;
+        background: rgba(231, 76, 60, 0.05);
+      }
+      .duplicates-table-wrapper .dup-col-reference {
+        color: #27ae60;
+        font-weight: 600;
+        background: rgba(39, 174, 96, 0.05);
+      }
+      .dup-algorithm-selector {
+        display: flex;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+        margin-bottom: 1rem;
+        padding: 0.75rem;
+        background: var(--bg-secondary, #f8fafc);
+        border-radius: 6px;
+        border: 1px solid var(--border-color, #e2e8f0);
+      }
+      .dup-algorithm-selector label {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-weight: 500;
+        cursor: pointer;
+        padding: 0.4rem 0.8rem;
+        border-radius: 6px;
+        transition: all 0.2s;
+        font-size: 0.85rem;
+        color: var(--text-secondary, #334155);
+        border: 2px solid transparent;
+      }
+      .dup-algorithm-selector label:hover {
+        background: var(--bg-hover, #f1f5f9);
+      }
+      .dup-algorithm-selector input[type="radio"] {
+        width: 16px;
+        height: 16px;
+        cursor: pointer;
+        accent-color: var(--primary, #4f46e5);
+      }
+      .dup-algorithm-selector label.active {
+        border-color: var(--primary, #4f46e5);
+        background: rgba(79, 70, 229, 0.08);
+        color: var(--primary, #4f46e5);
+      }
+      .database-tables-container {
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        max-height: 400px;
+        overflow-y: auto;
+        padding-right: 4px;
+      }
+      .database-tables-container::-webkit-scrollbar {
+        width: 4px;
+      }
+      .database-tables-container::-webkit-scrollbar-thumb {
+        background: var(--primary-light, #818cf8);
+        border-radius: 10px;
+      }
+      #db-selection-container {
+        position: sticky;
+        top: 0;
+        background: var(--bg-card, #ffffff);
+        z-index: 10;
+        padding: 0.5rem 0 1rem 0 !important;
+        border-bottom: 1px solid var(--border-color, #e2e8f0);
+        margin-bottom: 0.5rem;
+      }
+      #database-tables-container-existing {
+        max-height: 500px;
+        overflow-y: auto;
+        padding-right: 4px;
+      }
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0.75rem 2rem;
+        background: var(--bg-container);
+        border-bottom: 1px solid var(--border-color);
+        gap: 1rem;
+        flex-shrink: 0;
+        backdrop-filter: blur(10px);
+        position: sticky;
+        top: 0;
+        z-index: 100;
+        width: 100%;
+        box-sizing: border-box;
+      }
+      .topbar-right {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        margin-left: auto;
+      }
+      .topbar-center {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      .language-btn {
+        background: transparent;
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        padding: 0.3rem 0.6rem;
+        font-size: 0.75rem;
+        cursor: pointer;
+        color: var(--text-secondary);
+        transition: var(--transition);
+      }
+      .language-btn:hover {
+        background: var(--bg-hover);
+        border-color: var(--primary-light);
+      }
+      .language-btn.active {
+        background: var(--primary);
+        color: white;
+        border-color: var(--primary);
+      }
+      @media (max-width: 768px) {
+        .dashboard-content {
+          padding: 1rem !important;
+        }
+        .dup-algorithm-selector {
+          flex-direction: column;
+          align-items: stretch;
+        }
+        .dup-algorithm-selector label {
+          justify-content: center;
+        }
+        .dup-algorithm-selector .button {
+          margin-left: 0 !important;
+        }
+        .topbar {
+          padding: 0.5rem 1rem;
+          flex-wrap: wrap;
+        }
+        .topbar-brand .brand-name {
+          display: none;
+        }
+        .topbar-center {
+          order: 3;
+          width: 100%;
+          justify-content: center;
+          margin-top: 0.3rem;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="app-container">
+      <!-- ============================================
+        PAGE : PREMIER DEMARRAGE
+        ============================================ -->
+      <section
+        id="setup-view"
+        class="welcome-card hidden"
+        aria-labelledby="setup-title"
+      >
+        <div class="brand-header-row">
+          <div class="brand-mark">DM</div>
+          <button
+            id="theme-toggle-setup"
+            class="secondary-button theme-toggle-btn theme-global-btn"
+            type="button"
+          >
+            <i class="fas fa-moon"></i> Thème
+          </button>
+        </div>
+        <h1 id="setup-title">Premier démarrage</h1>
+        <p>Créez le premier utilisateur de l'application.</p>
+        <form id="setup-form">
+          <input
+            id="setup-pseudo"
+            name="pseudo"
+            type="text"
+            placeholder="Nom d'utilisateur"
+            autocomplete="username"
+            required
+          />
+          <input
+            id="setup-password"
+            name="password"
+            type="password"
+            placeholder="Mot de passe"
+            autocomplete="new-password"
+            required
+          />
+          <button type="submit">Créer l'utilisateur</button>
+        </form>
+        <p id="setup-message" class="status-message" role="alert"></p>
+      </section>
+
+      <!-- ============================================
+        PAGE : CONNEXION
+        ============================================ -->
+      <section
+        id="login-view"
+        class="welcome-card hidden"
+        aria-labelledby="login-title"
+      >
+        <div class="brand-header-row">
+          <div class="brand-mark">DM</div>
+          <button
+            id="theme-toggle-login"
+            class="secondary-button theme-toggle-btn theme-global-btn"
+            type="button"
+          >
+            <i class="fas fa-moon"></i> Thème
+          </button>
+        </div>
+        <h1 id="login-title">Bienvenue</h1>
+        <p>Connectez-vous pour accéder à vos données.</p>
+        <form id="login-form">
+          <input
+            id="login-pseudo"
+            name="pseudo"
+            type="text"
+            placeholder="Nom d'utilisateur"
+            autocomplete="username"
+            required
+          />
+          <input
+            id="login-password"
+            name="password"
+            type="password"
+            placeholder="Mot de passe"
+            autocomplete="current-password"
+            required
+          />
+          <button type="submit">Se connecter</button>
+        </form>
+        <p id="login-message" class="status-message" role="alert"></p>
+      </section>
+
+      <!-- ============================================
+        PAGE : TABLEAU DE BORD
+        ============================================ -->
+      <section
+        id="dashboard-view"
+        class="dashboard-layout hidden"
+        aria-labelledby="dashboard-title"
+      >
+        <!-- TOPBAR -->
+        <header class="topbar">
+          <div class="topbar-brand">
+            <div class="brand-mark small">DM</div>
+            <div>
+              <span class="brand-name">Data Manager</span>
+              <span class="brand-subtitle">Gestion de données</span>
+            </div>
+          </div>
+          <div class="topbar-center">
+            <button class="language-btn active" data-lang="fr" title="Français">
+              FR
+            </button>
+            <button class="language-btn" data-lang="en" title="English">
+              EN
+            </button>
+          </div>
+          <div class="topbar-right">
+            <button
+              class="secondary-button btn-home"
+              type="button"
+              onclick="goToDashboard()"
+            >
+              <i class="fas fa-home"></i> Accueil
+            </button>
+            <div class="menu-container">
+              <button
+                id="menu-button"
+                class="menu-button"
+                type="button"
+                aria-label="Ouvrir le menu"
+                aria-expanded="false"
+              >
+                <span></span><span></span><span></span>
+              </button>
+              <nav
+                id="user-menu"
+                class="user-menu hidden"
+                aria-label="Menu utilisateur"
+              >
+                <div class="menu-user">
+                  <div id="menu-avatar" class="avatar">?</div>
+                  <div class="menu-user-info">
+                    <strong id="menu-pseudo">Utilisateur</strong>
+                    <small>Connecté</small>
+                  </div>
+                </div>
+                <div class="menu-separator"></div>
+                <button class="menu-item theme-global-btn" type="button">
+                  <i class="fas fa-adjust"></i> Changer de thème
+                </button>
+                <button class="menu-item language-menu-btn" type="button">
+                  <i class="fas fa-language"></i> Langue :
+                  <span id="menu-lang-label">Français</span>
+                </button>
+                <button
+                  id="logout-button"
+                  class="menu-item logout-global-btn"
+                  type="button"
+                >
+                  <i class="fas fa-sign-out-alt"></i> Se déconnecter
+                </button>
+                <button
+                  id="quit-app-button"
+                  class="menu-item danger-item quit-global-btn"
+                  type="button"
+                >
+                  <i class="fas fa-power-off"></i> Quitter
+                </button>
+              </nav>
+            </div>
+          </div>
+        </header>
+
+        <!-- CONTENU -->
+        <div class="dashboard-content">
+          <!-- En-tête -->
+          <section class="dashboard-heading">
+            <div>
+              <p class="eyebrow">TABLEAU DE BORD</p>
+              <h1><span id="welcome-message">Bonjour</span></h1>
+              <p>Que souhaitez-vous faire aujourd'hui ?</p>
+            </div>
+            <div class="online-indicator"><span></span> Session active</div>
+          </section>
+
+          <!-- Grille des fonctionnalités -->
+          <section class="feature-grid">
+            <button id="import-excel-button" class="feature-card" type="button">
+              <span class="feature-icon purple"
+                ><i class="fas fa-file-import"></i
+              ></span>
+              <span class="feature-title" id="btn-import-title"
+                >Importer un fichier Excel</span
+              >
+              <span class="feature-description" id="btn-import-desc"
+                >Convertir un fichier Excel en base de données.</span
+              >
+              <span class="feature-arrow">→</span>
+            </button>
+            <button
+              id="open-database-button"
+              class="feature-card"
+              type="button"
+              onclick="goToExistingDb()"
+            >
+              <span class="feature-icon blue"
+                ><i class="fas fa-folder-open"></i
+              ></span>
+              <span class="feature-title" id="btn-open-title"
+                >Travailler avec une base existante</span
+              >
+              <span class="feature-description" id="btn-open-desc"
+                >Ouvrir et manipuler une base de données existante.</span
+              >
+              <span class="feature-arrow">→</span>
+            </button>
+          </section>
+
+          <!-- Base active -->
+          <section
+            id="database-status-section"
+            class="database-status-section hidden"
+          >
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">BASE DE DONNÉES</p>
+                <h2>Base active</h2>
+              </div>
+            </div>
+            <div class="database-info">
+              <p>
+                <strong>Nom :</strong>
+                <span id="current-database-name">Aucune base</span>
+              </p>
+              <p>
+                <strong>Emplacement :</strong>
+                <span id="current-database-path">—</span>
+              </p>
+            </div>
+            <div
+              id="database-tables-container"
+              class="database-tables-container"
+            ></div>
+          </section>
+
+          <!-- Activités récentes -->
+          <section class="recent-section">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">ACTIVITÉ</p>
+                <h2>Dernières actions</h2>
+              </div>
+              <span id="empty-activity-label" class="empty-label"
+                >Aucune action récente</span
+              >
+            </div>
+            <div id="empty-activity-state" class="empty-state">
+              <div class="empty-icon"><i class="fas fa-history"></i></div>
+              <p>Votre historique apparaîtra ici.</p>
+            </div>
+            <div id="activity-list" class="activity-list hidden"></div>
+          </section>
+        </div>
+      </section>
+
+      <!-- ============================================
+        PAGE : IMPORT EXCEL
+        ============================================ -->
+      <section
+        id="excel-import-view"
+        class="dashboard-layout hidden"
+        aria-labelledby="excel-import-title"
+      >
+        <header class="topbar">
+          <div class="topbar-brand">
+            <div class="brand-mark small">DM</div>
+            <div>
+              <span class="brand-name">Data Manager</span>
+              <span class="brand-subtitle">Import Excel</span>
+            </div>
+          </div>
+          <div class="topbar-center">
+            <button class="language-btn active" data-lang="fr" title="Français">
+              FR
+            </button>
+            <button class="language-btn" data-lang="en" title="English">
+              EN
+            </button>
+          </div>
+          <div class="topbar-right">
+            <button
+              class="secondary-button btn-home"
+              type="button"
+              onclick="goToDashboard()"
+            >
+              <i class="fas fa-home"></i> Accueil
+            </button>
+            <button
+              id="back-to-dashboard-button"
+              class="secondary-button"
+              type="button"
+            >
+              Retour
+            </button>
+            <div class="menu-container">
+              <button
+                id="menu-button-import"
+                class="menu-button"
+                type="button"
+                aria-label="Ouvrir le menu"
+                aria-expanded="false"
+              >
+                <span></span><span></span><span></span>
+              </button>
+              <nav
+                id="user-menu-import"
+                class="user-menu hidden"
+                aria-label="Menu utilisateur"
+              >
+                <div class="menu-user">
+                  <div id="menu-avatar-import" class="avatar">?</div>
+                  <div class="menu-user-info">
+                    <strong id="menu-pseudo-import">Utilisateur</strong>
+                    <small>Connecté</small>
+                  </div>
+                </div>
+                <div class="menu-separator"></div>
+                <button class="menu-item theme-global-btn" type="button">
+                  <i class="fas fa-adjust"></i> Changer de thème
+                </button>
+                <button class="menu-item language-menu-btn" type="button">
+                  <i class="fas fa-language"></i> Langue :
+                  <span class="menu-lang-label">Français</span>
+                </button>
+                <button
+                  id="logout-button-import"
+                  class="menu-item logout-global-btn"
+                  type="button"
+                >
+                  <i class="fas fa-sign-out-alt"></i> Se déconnecter
+                </button>
+                <button
+                  id="quit-app-button-import"
+                  class="menu-item danger-item quit-global-btn"
+                  type="button"
+                >
+                  <i class="fas fa-power-off"></i> Quitter
+                </button>
+              </nav>
+            </div>
+          </div>
+        </header>
+
+        <div class="dashboard-content">
+          <section class="dashboard-heading">
+            <div>
+              <p class="eyebrow">IMPORT</p>
+              <h1>Importer un fichier Excel</h1>
+            </div>
+          </section>
+
+          <section class="import-panel">
+            <div class="import-actions">
+              <button
+                id="select-excel-file-button"
+                class="button button-primary"
+                type="button"
+              >
+                <i class="fas fa-file-excel"></i> Sélectionner un fichier Excel
+              </button>
+              <span id="selected-excel-file" class="selected-file-label"
+                >Aucun fichier sélectionné</span
+              >
+            </div>
+
+            <div
+              id="excel-import-message"
+              class="status-message"
+              role="status"
+            ></div>
+
+            <label for="excel-table-name">Nom de la table dans la base</label>
+            <input
+              id="excel-table-name"
+              type="text"
+              placeholder="ex: clients_2024"
+            />
+
+            <button
+              id="import-excel-into-database-button"
+              class="button button-primary"
+              type="button"
+            >
+              <i class="fas fa-database"></i> Convertir en base de données
+            </button>
+
+            <div id="excel-sheet-container" class="form-group hidden">
+              <label for="excel-sheet-select">Feuille Excel</label>
+              <select id="excel-sheet-select">
+                <option value="">Sélectionnez une feuille</option>
+              </select>
+            </div>
+
+            <div
+              id="excel-preview-container"
+              class="excel-preview-container hidden"
+            >
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">COLONNES</p>
+                  <h2>Colonnes détectées</h2>
+                </div>
+                <span id="excel-preview-count"></span>
+              </div>
+              <div id="excel-preview" class="excel-preview"></div>
+              <div
+                id="excel-import-actions"
+                class="excel-import-actions hidden"
+              ></div>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <!-- ============================================
+        PAGE : BASES EXISTANTES
+        ============================================ -->
+      <section
+        id="existing-db-view"
+        class="dashboard-layout hidden"
+        aria-labelledby="existing-db-title"
+      >
+        <header class="topbar">
+          <div class="topbar-brand">
+            <div class="brand-mark small">DM</div>
+            <div>
+              <span class="brand-name">Data Manager</span>
+              <span class="brand-subtitle">Bases de données</span>
+            </div>
+          </div>
+          <div class="topbar-center">
+            <button class="language-btn active" data-lang="fr" title="Français">
+              FR
+            </button>
+            <button class="language-btn" data-lang="en" title="English">
+              EN
+            </button>
+          </div>
+          <div class="topbar-right">
+            <button
+              class="secondary-button btn-home"
+              type="button"
+              onclick="goToDashboard()"
+            >
+              <i class="fas fa-home"></i> Accueil
+            </button>
+            <div class="menu-container">
+              <button
+                id="menu-button-existing"
+                class="menu-button"
+                type="button"
+                aria-label="Ouvrir le menu"
+                aria-expanded="false"
+              >
+                <span></span><span></span><span></span>
+              </button>
+              <nav
+                id="user-menu-existing"
+                class="user-menu hidden"
+                aria-label="Menu utilisateur"
+              >
+                <div class="menu-user">
+                  <div id="menu-avatar-existing" class="avatar">?</div>
+                  <div class="menu-user-info">
+                    <strong id="menu-pseudo-existing">Utilisateur</strong>
+                    <small>Connecté</small>
+                  </div>
+                </div>
+                <div class="menu-separator"></div>
+                <button class="menu-item theme-global-btn" type="button">
+                  <i class="fas fa-adjust"></i> Changer de thème
+                </button>
+                <button class="menu-item language-menu-btn" type="button">
+                  <i class="fas fa-language"></i> Langue :
+                  <span class="menu-lang-label">Français</span>
+                </button>
+                <button
+                  id="logout-button-existing"
+                  class="menu-item logout-global-btn"
+                  type="button"
+                >
+                  <i class="fas fa-sign-out-alt"></i> Se déconnecter
+                </button>
+                <button
+                  id="quit-app-button-existing"
+                  class="menu-item danger-item quit-global-btn"
+                  type="button"
+                >
+                  <i class="fas fa-power-off"></i> Quitter
+                </button>
+              </nav>
+            </div>
+          </div>
+        </header>
+
+        <div class="dashboard-content">
+          <section class="dashboard-heading">
+            <div>
+              <p class="eyebrow">EXPLORATEUR</p>
+              <h1>Bases de données disponibles</h1>
+              <p>
+                Sélectionnez une base de données existante dans le dossier
+                <code>data/</code>.
+              </p>
+            </div>
+          </section>
+
+          <!-- Sélecteur de base -->
+          <section class="import-panel" style="margin-bottom: 1.5rem">
+            <div
+              id="db-selection-container"
+              class="form-group"
+              style="padding: 1rem 0"
+            >
+              <label
+                for="db-file-select"
+                style="font-weight: 600; display: block; margin-bottom: 0.5rem"
+              >
+                Fichiers de base de données disponibles :
+              </label>
+              <select
+                id="db-file-select"
+                style="
+                  width: 100%;
+                  padding: 0.75rem;
+                  border-radius: 6px;
+                  border: 1px solid var(--border-color, #ccc);
+                  font-size: 1rem;
+                "
+              >
+                <option value="">Chargement des bases...</option>
+              </select>
+              <span
+                id="selected-db-path-label"
+                class="selected-file-label"
+                style="
+                  display: block;
+                  margin-top: 0.75rem;
+                  color: var(--text-color, gray);
+                  font-style: italic;
+                "
+              >
+                Aucune base sélectionnée
+              </span>
+            </div>
+          </section>
+
+          <!-- Toggle tables -->
+          <div
+            style="
+              margin-bottom: 1rem;
+              display: flex;
+              align-items: center;
+              gap: 12px;
+            "
+          >
+            <input
+              type="checkbox"
+              id="toggle-show-tables-list"
+              style="width: 28px; height: 28px; cursor: pointer"
+            />
+            <label
+              for="toggle-show-tables-list"
+              style="
+                font-weight: 600;
+                cursor: pointer;
+                color: var(--text-color);
+              "
+            >
+              Afficher le contenu de la base
+            </label>
+          </div>
+
+          <!-- Conteneur des tables -->
+          <section
+            id="database-tables-container-existing"
+            class="database-status-section"
+            style="margin-bottom: 1.5rem"
+          ></section>
+
+          <!-- Panneau d'administration -->
+          <section id="db-actions-panel" class="hidden">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">OUTILS</p>
+                <h2>Outils de gestion</h2>
+              </div>
+            </div>
+
+            <div
+              class="feature-grid"
+              style="
+                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+                margin-bottom: 2rem;
+                gap: 1rem;
+              "
+            >
+              <button
+                id="btn-check-duplicates"
+                class="feature-card"
+                type="button"
+                style="padding: 1.2rem; cursor: pointer; text-align: left"
+              >
+                <span class="feature-icon purple"
+                  ><i class="fas fa-clone"></i
+                ></span>
+                <span
+                  class="feature-title"
+                  style="display: block; margin-top: 0.5rem"
+                  >1. Trouver les doublons</span
+                >
+              </button>
+              <button
+                id="btn-clean-db"
+                class="feature-card"
+                type="button"
+                style="padding: 1.2rem; cursor: pointer; text-align: left"
+              >
+                <span class="feature-icon blue"
+                  ><i class="fas fa-broom"></i
+                ></span>
+                <span
+                  class="feature-title"
+                  style="display: block; margin-top: 0.5rem"
+                  >2. Nettoyer les données</span
+                >
+              </button>
+              <button
+                id="btn-manipulate-db"
+                class="feature-card"
+                type="button"
+                style="padding: 1.2rem; cursor: pointer; text-align: left"
+              >
+                <span class="feature-icon purple"
+                  ><i class="fas fa-sliders-h"></i
+                ></span>
+                <span
+                  class="feature-title"
+                  style="display: block; margin-top: 0.5rem"
+                  >3. Manipuler les données</span
+                >
+              </button>
+              <button
+                id="btn-export-excel"
+                class="feature-card"
+                type="button"
+                style="padding: 1.2rem; cursor: pointer; text-align: left"
+              >
+                <span class="feature-icon blue"
+                  ><i class="fas fa-file-excel"></i
+                ></span>
+                <span
+                  class="feature-title"
+                  style="display: block; margin-top: 0.5rem"
+                  >4. Exporter vers Excel</span
+                >
+              </button>
+            </div>
+
+            <!-- CONTENEUR DES RÉSULTATS DE DOUBLONS -->
+            <div
+              id="db-results-container"
+              class="database-status-section hidden"
+              style="
+                background: var(--card-bg);
+                padding: 1.5rem;
+                border-radius: 8px;
+              "
+            >
+              <div
+                class="section-heading"
+                style="
+                  display: flex;
+                  justify-content: space-between;
+                  align-items: center;
+                  margin-bottom: 1rem;
+                  flex-wrap: wrap;
+                  gap: 10px;
+                "
+              >
+                <div style="display: flex; align-items: center; gap: 12px">
+                  <h3 id="results-title" style="margin: 0; font-size: 1.1rem">
+                    <i
+                      class="fas fa-clone"
+                      style="color: var(--primary, #4f46e5)"
+                    ></i>
+                    Résultats - Recherche de doublons
+                  </h3>
+                  <button
+                    id="btn-expand-dups"
+                    class="secondary-button hidden"
+                    type="button"
+                    style="padding: 0.3rem 0.8rem; font-size: 0.8rem"
+                  >
+                    <i class="fas fa-expand"></i> Agrandir
+                  </button>
+                </div>
+                <div
+                  id="duplicate-actions-toolbar"
+                  class="hidden"
+                  style="
+                    display: flex;
+                    gap: 0.5rem;
+                    flex-wrap: wrap;
+                    align-items: center;
+                  "
+                >
+                  <button
+                    id="btn-select-all-dups"
+                    class="secondary-button"
+                    type="button"
+                    style="
+                      padding: 0.4rem 0.8rem;
+                      font-size: 0.8rem;
+                      background: var(--bg-secondary, #e2e8f0);
+                      border: 1px solid var(--border-color, #cbd5e1);
+                      cursor: pointer;
+                      border-radius: 4px;
+                    "
+                  >
+                    <i class="fas fa-check-double"></i> Tout sélectionner
+                  </button>
+                  <button
+                    id="btn-delete-selected-dups"
+                    class="button button-primary"
+                    type="button"
+                    style="
+                      background: #dc3545;
+                      padding: 0.4rem 0.8rem;
+                      font-size: 0.8rem;
+                      border: none;
+                      color: white;
+                      border-radius: 4px;
+                      cursor: pointer;
+                    "
+                  >
+                    <i class="fas fa-trash"></i> Supprimer
+                  </button>
+                  <button
+                    id="btn-save-dups"
+                    class="button button-primary"
+                    type="button"
+                    style="
+                      background: #28a745;
+                      padding: 0.4rem 0.8rem;
+                      font-size: 0.8rem;
+                      border: none;
+                      color: white;
+                      border-radius: 4px;
+                      cursor: pointer;
+                    "
+                  >
+                    <i class="fas fa-save"></i> Enregistrer
+                  </button>
+                  <button
+                    id="btn-cancel-dups"
+                    class="secondary-button"
+                    type="button"
+                    style="
+                      padding: 0.4rem 0.8rem;
+                      font-size: 0.8rem;
+                      background: #6c757d;
+                      border: none;
+                      color: white;
+                      border-radius: 4px;
+                      cursor: pointer;
+                    "
+                  >
+                    <i class="fas fa-times"></i> Annuler
+                  </button>
+                  <button
+                    id="btn-export-dups-pdf"
+                    class="button button-primary"
+                    type="button"
+                    style="
+                      background: #c0392b;
+                      padding: 0.4rem 0.8rem;
+                      font-size: 0.8rem;
+                      border: none;
+                      color: white;
+                      border-radius: 4px;
+                      cursor: pointer;
+                    "
+                  >
+                    <i class="fas fa-file-pdf"></i> Exporter PDF
+                  </button>
+                </div>
+              </div>
+              <div
+                id="db-results-content"
+                style="max-height: 420px; overflow-y: auto"
+              ></div>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <!-- ============================================
+        PAGE : MANIPULATION DES DONNÉES
+        ============================================ -->
+      <!-- ============================================
+        PAGE : MANIPULATION DES DONNÉES
+        ============================================ -->
+      <section
+        id="manipulate-view"
+        class="dashboard-layout hidden"
+        aria-labelledby="manipulate-title"
+      >
+        <header class="topbar">
+          <div class="topbar-brand">
+            <div class="brand-mark small">DM</div>
+            <div>
+              <span class="brand-name">Data Manager</span>
+              <span class="brand-subtitle">Manipulation</span>
+            </div>
+          </div>
+          <div class="topbar-center">
+            <button class="language-btn active" data-lang="fr" title="Français">
+              FR
+            </button>
+            <button class="language-btn" data-lang="en" title="English">
+              EN
+            </button>
+          </div>
+          <div class="topbar-right">
+            <button
+              class="secondary-button btn-home"
+              type="button"
+              onclick="goToDashboard()"
+            >
+              <i class="fas fa-home"></i> Accueil
+            </button>
+            <button
+              class="secondary-button"
+              type="button"
+              onclick="goToExistingDb()"
+            >
+              Retour
+            </button>
+            <div class="menu-container">
+              <button
+                id="menu-button-manipulate"
+                class="menu-button"
+                type="button"
+                aria-label="Ouvrir le menu"
+                aria-expanded="false"
+              >
+                <span></span><span></span><span></span>
+              </button>
+              <nav
+                id="user-menu-manipulate"
+                class="user-menu hidden"
+                aria-label="Menu utilisateur"
+              >
+                <div class="menu-user">
+                  <div id="menu-avatar-manipulate" class="avatar">?</div>
+                  <div class="menu-user-info">
+                    <strong id="menu-pseudo-manipulate">Utilisateur</strong>
+                    <small>Connecté</small>
+                  </div>
+                </div>
+                <div class="menu-separator"></div>
+                <button class="menu-item theme-global-btn" type="button">
+                  <i class="fas fa-adjust"></i> Changer de thème
+                </button>
+                <button class="menu-item language-menu-btn" type="button">
+                  <i class="fas fa-language"></i> Langue :
+                  <span class="menu-lang-label">Français</span>
+                </button>
+                <button
+                  id="logout-button-manipulate"
+                  class="menu-item logout-global-btn"
+                  type="button"
+                >
+                  <i class="fas fa-sign-out-alt"></i> Se déconnecter
+                </button>
+                <button
+                  id="quit-app-button-manipulate"
+                  class="menu-item danger-item quit-global-btn"
+                  type="button"
+                >
+                  <i class="fas fa-power-off"></i> Quitter
+                </button>
+              </nav>
+            </div>
+          </div>
+        </header>
+
+        <div class="dashboard-content">
+          <section class="dashboard-heading">
+            <div>
+              <p class="eyebrow">MANIPULATION</p>
+              <h1>Manipulation avancée des données</h1>
+              <p>
+                Sélectionnez une table, filtrez, recherchez ou effectuez des
+                opérations.
+              </p>
+            </div>
+          </section>
+
+          <!-- ✅ Panneau de contrôle FIXE (sticky) -->
+          <section
+            class="manipulate-control-panel"
+            style="
+              position: sticky;
+              top: 0;
+              z-index: 50;
+              background: var(--bg-body);
+              padding: 0.5rem 0 1rem 0;
+              margin: 0 -0.5rem 1rem -0.5rem;
+              border-bottom: 1px solid var(--border-color);
+            "
+          >
+            <div
+              class="import-panel"
+              style="
+                margin-bottom: 0;
+                display: flex;
+                flex-direction: column;
+                gap: 1rem;
+                padding: 1rem 1.5rem;
+              "
+            >
+              <!-- Sélection de la table -->
+              <div
+                style="
+                  display: flex;
+                  gap: 1rem;
+                  align-items: flex-end;
+                  flex-wrap: wrap;
+                "
+              >
+                <div style="flex: 1; min-width: 200px">
+                  <label
+                    for="manipulate-table-select"
+                    style="
+                      font-weight: 600;
+                      display: block;
+                      margin-bottom: 0.5rem;
+                    "
+                  >
+                    Sélectionner la table :
+                  </label>
+                  <select
+                    id="manipulate-table-select"
+                    style="
+                      width: 100%;
+                      padding: 0.75rem;
+                      border-radius: 6px;
+                      border: 1px solid var(--border-color);
+                      background: var(--bg-card);
+                    "
+                  >
+                    <option value="">-- Charger les tables --</option>
+                  </select>
+                </div>
+                <button
+                  id="btn-manipulate-select-table"
+                  class="button button-primary"
+                  type="button"
+                  style="height: 45px; min-width: 120px"
+                >
+                  <i class="fas fa-check"></i> Valider
+                </button>
+              </div>
+
+              <!-- Outils de manipulation -->
+              <div
+                style="
+                  display: flex;
+                  gap: 10px;
+                  flex-wrap: wrap;
+                  padding: 10px;
+                  background: var(--bg-secondary, #f8fafc);
+                  border-radius: 6px;
+                "
+              >
+                <span
+                  style="
+                    font-weight: 700;
+                    color: var(--text-primary);
+                    font-size: 1rem;
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                  "
+                >
+                  <i
+                    class="fas fa-tools"
+                    style="color: var(--primary, #4f46e5)"
+                  ></i>
+                  Outils :
+                </span>
+                <!-- Dans la section manipulation, modifier les boutons -->
+                <div
+                  style="
+                    display: flex;
+                    gap: 10px;
+                    flex-wrap: wrap;
+                    margin-top: 10px;
+                    padding: 10px;
+                    background: var(--bg-secondary, #f8fafc);
+                    border-radius: 6px;
+                  "
+                >
+                  <span
+                    style="
+                      font-weight: 700;
+                      color: var(--text-primary);
+                      font-size: 1rem;
+                      display: flex;
+                      align-items: center;
+                      gap: 8px;
+                    "
+                  >
+                    <i
+                      class="fas fa-tools"
+                      style="color: var(--primary, #4f46e5)"
+                    ></i>
+                    Outils :
+                  </span>
+                  <button
+                    id="btn-manipulate-search"
+                    class="secondary-button"
+                    type="button"
+                    style="
+                      background: var(--primary, #4f46e5);
+                      color: white;
+                      border: none;
+                    "
+                  >
+                    <i class="fas fa-search"></i> Rechercher
+                  </button>
+                  <button
+                    id="btn-manipulate-filters"
+                    class="secondary-button"
+                    type="button"
+                  >
+                    <i class="fas fa-filter"></i> Filtrer les colonnes
+                  </button>
+                  <button
+                    id="btn-manipulate-operations"
+                    class="secondary-button"
+                    type="button"
+                  >
+                    <i class="fas fa-cogs"></i> Requêtes SQL
+                  </button>
+                </div>
+              </div>
+
+              <!-- Zone de recherche -->
+              <div
+                id="manipulate-search-bar-area"
+                class="hidden"
+                style="
+                  display: flex;
+                  gap: 8px;
+                  align-items: center;
+                  background: var(--card-bg);
+                  padding: 12px;
+                  border-radius: 6px;
+                  border: 1px solid var(--border-color);
+                "
+              >
+                <input
+                  type="text"
+                  id="manipulate-search-input"
+                  placeholder="Entrez votre recherche..."
+                  style="
+                    flex: 1;
+                    padding: 10px;
+                    border-radius: 4px;
+                    border: 1px solid var(--border-color);
+                    background: var(--bg-input);
+                  "
+                />
+                <button
+                  id="btn-execute-search"
+                  class="button button-primary"
+                  type="button"
+                >
+                  <i class="fas fa-search"></i> Chercher
+                </button>
+              </div>
+
+              <!-- Zone des filtres -->
+              <div
+                id="manipulate-filters-area"
+                class="hidden"
+                style="
+                  background: var(--card-bg);
+                  padding: 16px;
+                  border-radius: 6px;
+                  border: 1px solid var(--border-color);
+                "
+              ></div>
+
+              <!-- Zone des opérations SQL -->
+              <div
+                id="manipulate-operations-area"
+                class="hidden"
+                style="
+                  background: var(--card-bg);
+                  padding: 16px;
+                  border-radius: 6px;
+                  border: 1px solid var(--border-color);
+                  display: flex;
+                  flex-direction: column;
+                  gap: 1rem;
+                "
+              >
+                <div
+                  style="
+                    font-weight: 600;
+                    color: var(--text-color);
+                    font-size: 1.05rem;
+                  "
+                >
+                  <i class="fas fa-cogs"></i> Constructeur de requêtes
+                </div>
+
+                <div style="display: flex; gap: 8px; flex-wrap: wrap">
+                  <button
+                    type="button"
+                    class="secondary-button op-btn"
+                    data-op="SELECT_ALL"
+                    style="
+                      flex: 1;
+                      min-width: 100px;
+                      background: var(--primary-color, #4f46e5);
+                      color: #ffffff;
+                    "
+                  >
+                    Voir tout
+                  </button>
+                  <button
+                    type="button"
+                    class="secondary-button op-btn"
+                    data-op="DISTINCT"
+                    style="flex: 1; min-width: 90px"
+                  >
+                    Valeurs uniques
+                  </button>
+                  <button
+                    type="button"
+                    class="secondary-button op-btn"
+                    data-op="MIN"
+                    style="flex: 1; min-width: 70px"
+                  >
+                    Minimum
+                  </button>
+                  <button
+                    type="button"
+                    class="secondary-button op-btn"
+                    data-op="MAX"
+                    style="flex: 1; min-width: 70px"
+                  >
+                    Maximum
+                  </button>
+                  <button
+                    type="button"
+                    class="secondary-button op-btn"
+                    data-op="COUNT"
+                    style="flex: 1; min-width: 80px"
+                  >
+                    Compter
+                  </button>
+                  <button
+                    type="button"
+                    class="secondary-button op-btn"
+                    data-op="SUM"
+                    style="flex: 1; min-width: 70px"
+                  >
+                    Somme
+                  </button>
+                  <button
+                    type="button"
+                    class="secondary-button op-btn"
+                    data-op="AVG"
+                    style="flex: 1; min-width: 70px"
+                  >
+                    Moyenne
+                  </button>
+                  <button
+                    type="button"
+                    class="secondary-button op-btn"
+                    data-op="WHERE_LIKE"
+                    style="flex: 1; min-width: 110px"
+                  >
+                    Rechercher
+                  </button>
+                  <button
+                    type="button"
+                    class="secondary-button op-btn"
+                    data-op="GROUP_BY"
+                    style="flex: 1; min-width: 100px"
+                  >
+                    Grouper
+                  </button>
+                </div>
+
+                <input
+                  type="hidden"
+                  id="selected-operation-type"
+                  value="SELECT_ALL"
+                />
+
+                <div
+                  style="
+                    display: grid;
+                    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+                    gap: 1rem;
+                    margin-top: 0.5rem;
+                  "
+                >
+                  <div>
+                    <label
+                      for="op-attribute-select"
+                      style="
+                        font-size: 0.9rem;
+                        display: block;
+                        margin-bottom: 0.3rem;
+                      "
+                      >Colonne cible :</label
+                    >
+                    <select
+                      id="op-attribute-select"
+                      style="
+                        width: 100%;
+                        padding: 0.6rem;
+                        border-radius: 4px;
+                        border: 1px solid var(--border-color);
+                        background: var(--bg-input);
+                      "
+                    >
+                      <option value="">
+                        -- Sélectionnez une table d'abord --
+                      </option>
+                    </select>
+                  </div>
+                  <div id="op-value-wrapper">
+                    <label
+                      for="op-value-input"
+                      style="
+                        font-size: 0.9rem;
+                        display: block;
+                        margin-bottom: 0.3rem;
+                      "
+                      >Valeur (optionnel) :</label
+                    >
+                    <input
+                      type="text"
+                      id="op-value-input"
+                      placeholder="Ex: valeur recherchée..."
+                      style="
+                        width: 100%;
+                        padding: 0.6rem;
+                        border-radius: 4px;
+                        border: 1px solid var(--border-color);
+                        box-sizing: border-box;
+                        background: var(--bg-input);
+                      "
+                    />
+                  </div>
+                  <div id="op-groupby-wrapper">
+                    <label
+                      for="op-groupby-select"
+                      style="
+                        font-size: 0.9rem;
+                        display: block;
+                        margin-bottom: 0.3rem;
+                      "
+                      >Grouper par :</label
+                    >
+                    <select
+                      id="op-groupby-select"
+                      style="
+                        width: 100%;
+                        padding: 0.6rem;
+                        border-radius: 4px;
+                        border: 1px solid var(--border-color);
+                        background: var(--bg-input);
+                      "
+                    >
+                      <option value="">-- Aucun --</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div
+                  style="
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    margin-top: 1rem;
+                    flex-wrap: wrap;
+                    gap: 0.5rem;
+                  "
+                >
+                  <button
+                    id="btn-reset-operation"
+                    class="secondary-button"
+                    type="button"
+                    style="background: #6c757d; color: white"
+                  >
+                    <i class="fas fa-undo"></i> Réinitialiser
+                  </button>
+                  <button
+                    id="btn-execute-operation"
+                    class="button button-primary"
+                    type="button"
+                  >
+                    <i class="fas fa-play"></i> Exécuter
+                  </button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Résultats de manipulation -->
+          <section
+            class="database-status-section"
+            style="
+              background: var(--card-bg);
+              padding: 1.5rem;
+              border-radius: 8px;
+            "
+          >
+            <div
+              style="
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 1rem;
+                flex-wrap: wrap;
+                gap: 0.5rem;
+              "
+            >
+              <div style="display: flex; align-items: center; gap: 12px">
+                <h3 style="margin: 0">Résultats</h3>
+                <button
+                  id="btn-expand-manipulate"
+                  class="secondary-button"
+                  type="button"
+                  style="padding: 0.4rem 0.8rem; font-size: 0.85rem"
+                >
+                  <i class="fas fa-expand"></i> Agrandir
+                </button>
+              </div>
+              <div>
+                <strong>Nombre de résultats :</strong>
+                <span
+                  id="manipulate-response-count"
+                  style="color: var(--primary-color)"
+                  >0</span
+                >
+              </div>
+            </div>
+            <div
+              id="manipulate-results-table-container"
+              class="table-scroll-container"
+              style="max-height: 480px; overflow-y: auto"
+            >
+              <p style="color: gray">
+                Veuillez sélectionner une table pour afficher les données.
+              </p>
+            </div>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <!-- NOTIFICATIONS -->
+    <div
+      id="notification-container"
+      aria-live="polite"
+      aria-atomic="true"
+    ></div>
+
+    <!-- SCRIPTS -->
+    <script src="js/app.js"></script>
+  </body>
+</html>
