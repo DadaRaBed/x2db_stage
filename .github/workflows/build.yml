@@ -1,4 +1,4 @@
-name: Build Windows Installer
+name: Build Windows Executable
 
 on:
   push:
@@ -13,10 +13,10 @@ jobs:
     
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v3  # Version stable
     
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v4  # Version stable
       with:
         python-version: '3.10'
     
@@ -30,23 +30,7 @@ jobs:
         pyinstaller --onefile --windowed --name="DataManager" --add-data "web;web" --add-data "data;data" --add-data "services;services" --add-data "repositories;repositories" app.py
     
     - name: Upload executable
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v3  # Version stable
       with:
         name: DataManager-Windows
         path: dist/DataManager.exe
-    
-    - name: Create installer with Inno Setup
-      run: |
-        # Télécharger Inno Setup
-        curl -L -o innosetup.exe https://jrsoftware.org/download.php/is.exe
-        # Installer Inno Setup (silencieux)
-        start /wait innosetup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
-        # Compiler le script Inno Setup
-        "C:\Program Files (x86)\Inno Setup 6\iscc" DataManager.iss
-      continue-on-error: true
-    
-    - name: Upload installer
-      uses: actions/upload-artifact@v4
-      with:
-        name: DataManager-Setup
-        path: installer/DataManager_Setup.exe
