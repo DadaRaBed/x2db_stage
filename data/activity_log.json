@@ -1,20 +1,5 @@
 [
   {
-    "text": "Suppression de 1000 doublons",
-    "date": "2026-09-08 09:51:25",
-    "user": "nabory"
-  },
-  {
-    "text": "Suppression de 992 doublons",
-    "date": "2026-09-08 09:51:29",
-    "user": "nabory"
-  },
-  {
-    "text": "Suppression de 534 doublons",
-    "date": "2026-09-08 09:54:32",
-    "user": "nabory"
-  },
-  {
     "text": "Exécution de SELECT_ALL sur pms_25",
     "date": "2026-09-08 10:11:57",
     "user": "nabory"
@@ -497,6 +482,21 @@
   {
     "text": "Terminer la base : maj_bdd_eaf_juin_2026_ttmr_ihb.db",
     "date": "2026-09-10 14:47:51",
+    "user": "nabory"
+  },
+  {
+    "text": "Suppression de la base : maj_bdd_gpt_juin_2026_ttmr_ihb_zone02_vf.db",
+    "date": "2026-09-10 18:26:47",
+    "user": "nabory"
+  },
+  {
+    "text": "Ouverture de la base : maj_bdd_gpt_juin_2026_ttmr_ihb_zone02_vf.db",
+    "date": "2026-09-10 18:27:57",
+    "user": "nabory"
+  },
+  {
+    "text": "Terminer la base : maj_bdd_gpt_juin_2026_ttmr_ihb_zone02_vf.db",
+    "date": "2026-09-10 18:33:07",
     "user": "nabory"
   }
 ]

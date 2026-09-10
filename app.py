@@ -6,6 +6,7 @@ import webview
 import json
 import os
 import gc
+import sys
 import unicodedata
 import time
 from typing import Optional, Dict, Any, List
@@ -17,8 +18,56 @@ from services.excel_service import ExcelService
 
 from repositories.system_database import initialize_database, user_count
 
+
+# ============================================================
+# DETECTION DU MODE D'EXECUTION (DEV vs EXE PyInstaller)
+# ============================================================
+def get_app_data_dir() -> Path:
+    """
+    Retourne le dossier ou stocker les donnees utilisateur (persistant).
+
+    - Mode EXE PyInstaller : %APPDATA%/DataManager/data (Windows)
+                             ~/.local/share/DataManager/data (Linux/macOS)
+    - Mode DEV             : <projet>/data
+
+    Le dossier est cree automatiquement s'il n'existe pas.
+    """
+    if getattr(sys, "frozen", False):
+        # Mode EXE : utiliser un dossier PERSISTANT
+        if sys.platform == "win32":
+            base = Path(os.environ.get("APPDATA", os.path.expanduser("~")))
+        else:
+            base = Path(os.path.expanduser("~/.local/share"))
+        app_dir = base / "DataManager"
+    else:
+        # Mode DEV : dossier du projet
+        app_dir = Path(__file__).resolve().parent
+
+    data_dir = app_dir / "data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    return data_dir
+
+
+def get_resource_path(relative_path: str) -> Path:
+    """
+    Retourne le chemin vers une ressource embarquee (web/index.html...).
+
+    - Mode EXE : _MEIPASS (dossier temporaire PyInstaller) ou dossier de l'exe
+    - Mode DEV : dossier du projet
+    """
+    if getattr(sys, "frozen", False):
+        base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+    else:
+        base = Path(__file__).resolve().parent
+    return base / relative_path
+
+
+# ============================================================
+# CONSTANTES GLOBALES
+# ============================================================
 BASE_DIR = Path(__file__).resolve().parent
-INDEX_FILE = BASE_DIR / "web" / "index.html"
+DATA_DIR = get_app_data_dir()
+INDEX_FILE = get_resource_path("web/index.html")
 
 _APP_WINDOW = None
 
@@ -54,6 +103,27 @@ class Api:
         if row_factory is not None:
             conn.row_factory = row_factory
         return conn
+
+    def _safe_close_connection(self, conn):
+        """Ferme proprement une connexion SQLite avec checkpoint WAL."""
+        if conn is None:
+            return
+        try:
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
+        except Exception:
+            pass
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+    def _release_resources(self, delay: float = 0.25):
+        """Force le GC et laisse SQLite liberer les fichiers WAL/SHM."""
+        try:
+            gc.collect()
+        except Exception:
+            pass
+        time.sleep(delay)
 
     # ============================================================
     # AUTHENTIFICATION
@@ -128,18 +198,13 @@ class Api:
             self._is_loading = False
             self._loading_start_time = None
 
-            # Liberer les ressources
-            try:
-                gc.collect()
-            except Exception:
-                pass
-            time.sleep(0.15)
+            self._release_resources(0.15)
 
             return {
                 "success": True,
                 "message": "Deconnexion reussie.",
             }
-        except Exception as e:
+        except Exception:
             self.current_user = None
             self._active_db_path = None
             self._last_db_path = None
@@ -150,7 +215,7 @@ class Api:
             }
 
     # ============================================================
-    # TERMINER LA BASE DE DONNEES (renforce anti-thread-zombie)
+    # TERMINER LA BASE DE DONNEES
     # ============================================================
     def terminate_database(self):
         try:
@@ -175,26 +240,17 @@ class Api:
 
             db_name = os.path.basename(self._active_db_path)
 
-            # 1. Fermer la connexion du DatabaseService (avec try/except)
             try:
                 self._database_service.close_database()
             except Exception as e:
                 print(f"[INFO] Fermeture base (thread different) : {e}")
 
-            # 2. Reinitialiser TOUTES les variables d'etat
             self._active_db_path = None
             self._last_db_path = None
             self._is_loading = False
             self._loading_start_time = None
 
-            # 3. Forcer le garbage collector pour liberer les connexions orphelines
-            try:
-                gc.collect()
-            except Exception:
-                pass
-
-            # 4. Petit delai pour laisser SQLite liberer les fichiers WAL/SHM
-            time.sleep(0.3)
+            self._release_resources(0.3)
 
             return {
                 "success": True,
@@ -202,8 +258,7 @@ class Api:
                 "closed_db": db_name,
             }
 
-        except Exception as e:
-            # En cas d'erreur, on reinitialise quand meme pour eviter un etat bloque
+        except Exception:
             self._active_db_path = None
             self._last_db_path = None
             self._is_loading = False
@@ -227,7 +282,7 @@ class Api:
     # ============================================================
     def get_activities(self, limit: int = 5):
         try:
-            log_file = BASE_DIR / "data" / "activity_log.json"
+            log_file = DATA_DIR / "activity_log.json"
             if not log_file.exists():
                 return {"success": True, "activities": []}
 
@@ -244,7 +299,7 @@ class Api:
 
     def log_activity(self, action_text: str):
         try:
-            log_file = BASE_DIR / "data" / "activity_log.json"
+            log_file = DATA_DIR / "activity_log.json"
             log_file.parent.mkdir(parents=True, exist_ok=True)
 
             activities = []
@@ -282,8 +337,8 @@ class Api:
         Supprime definitivement une base de donnees (.db) du dossier data/.
 
         Protections :
-        - system.db ne peut JAMAIS etre supprime (contient les utilisateurs)
-        - La base actuellement ouverte est automatiquement fermee avant suppression
+        - system.db ne peut JAMAIS etre supprime
+        - La base actuellement ouverte est fermee automatiquement
         - Fichiers annexes WAL/SHM supprimes aussi
         """
         try:
@@ -292,10 +347,9 @@ class Api:
 
             db_file = Path(db_path).resolve()
 
-            # Securite : reste dans le dossier data/
-            data_dir = (BASE_DIR / "data").resolve()
+            # Securite : reste dans le dossier DATA_DIR
             try:
-                db_file.relative_to(data_dir)
+                db_file.relative_to(DATA_DIR.resolve())
             except ValueError:
                 return {
                     "success": False,
@@ -305,7 +359,6 @@ class Api:
             if not db_file.exists():
                 return {"success": False, "message": "La base de donnees n'existe pas."}
 
-            # Protection de system.db
             if db_file.name.lower() == "system.db":
                 return {
                     "success": False,
@@ -314,7 +367,6 @@ class Api:
 
             db_name = db_file.name
 
-            # Si la base est actuellement ouverte, la fermer proprement
             if self._active_db_path and os.path.abspath(self._active_db_path) == str(db_file):
                 try:
                     self._database_service.close_database()
@@ -322,15 +374,10 @@ class Api:
                     pass
                 self._active_db_path = None
                 self._last_db_path = None
-                try:
-                    gc.collect()
-                except Exception:
-                    pass
+                self._release_resources(0.2)
 
-            # Petite pause pour laisser SQLite liberer les verrous
             time.sleep(0.25)
 
-            # Suppression du fichier principal + fichiers annexes WAL/SHM
             deleted_files = []
             try:
                 if db_file.exists():
@@ -367,10 +414,7 @@ class Api:
     # SUPPRESSION DE TABLE
     # ============================================================
     def delete_table(self, table_name: str, file_path: str = None):
-        """
-        Supprime une table dans la base de donnees active.
-        Protection : 'listes_meres' peut etre supprimee, mais pas les tables systeme SQLite.
-        """
+        """Supprime une table dans la base active (sauf tables systeme)."""
         try:
             if not table_name or not str(table_name).strip():
                 return {"success": False, "message": "Le nom de la table est requis."}
@@ -385,21 +429,17 @@ class Api:
             try:
                 cursor = conn.cursor()
 
-                # Verifier que la table existe
                 cursor.execute(
                     "SELECT name FROM sqlite_master WHERE type='table' AND name = ?",
                     (table_name,),
                 )
                 if not cursor.fetchone():
-                    conn.close()
                     return {
                         "success": False,
                         "message": f"La table '{table_name}' n'existe pas.",
                     }
 
-                # Interdire la suppression des tables systeme
                 if table_name.lower() in ("sqlite_sequence", "sqlite_master"):
-                    conn.close()
                     return {
                         "success": False,
                         "message": "Suppression interdite : table systeme SQLite.",
@@ -408,7 +448,7 @@ class Api:
                 cursor.execute(f'DROP TABLE IF EXISTS "{safe_table}"')
                 conn.commit()
             finally:
-                conn.close()
+                self._safe_close_connection(conn)
 
             return {
                 "success": True,
@@ -506,7 +546,7 @@ class Api:
             if not table_name or not table_name.strip():
                 return {"success": False, "message": "Le nom de la table est requis."}
 
-            data_dir = BASE_DIR / "data"
+            data_dir = DATA_DIR
             data_dir.mkdir(parents=True, exist_ok=True)
 
             safe_db_name = self._clean_ascii(db_name) or "nouvelle_base"
@@ -522,30 +562,30 @@ class Api:
                 }
 
             conn = self._connect_db(str(db_path))
-            cursor = conn.cursor()
-
-            cursor.execute(f'''
-                CREATE TABLE IF NOT EXISTS "{safe_table_name}" (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    cin TEXT,
-                    nom TEXT,
-                    commune TEXT,
-                    fkt TEXT,
-                    district TEXT,
-                    region TEXT,
-                    filiation_menage TEXT,
-                    pole_de_developpement TEXT,
-                    filieres TEXT,
-                    opr TEXT,
-                    h_f TEXT,
-                    categorisation_eaf TEXT,
-                    variete TEXT,
-                    observation TEXT
-                )
-            ''')
-
-            conn.commit()
-            conn.close()
+            try:
+                cursor = conn.cursor()
+                cursor.execute(f'''
+                    CREATE TABLE IF NOT EXISTS "{safe_table_name}" (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        cin TEXT,
+                        nom TEXT,
+                        commune TEXT,
+                        fkt TEXT,
+                        district TEXT,
+                        region TEXT,
+                        filiation_menage TEXT,
+                        pole_de_developpement TEXT,
+                        filieres TEXT,
+                        opr TEXT,
+                        h_f TEXT,
+                        categorisation_eaf TEXT,
+                        variete TEXT,
+                        observation TEXT
+                    )
+                ''')
+                conn.commit()
+            finally:
+                self._safe_close_connection(conn)
 
             return {
                 "success": True,
@@ -567,7 +607,7 @@ class Api:
             if not os.path.exists(str(excel_path)):
                 return {"success": False, "message": f"Fichier introuvable : {file_path}"}
 
-            data_dir = BASE_DIR / "data"
+            data_dir = DATA_DIR
             data_dir.mkdir(parents=True, exist_ok=True)
 
             if db_name:
@@ -583,46 +623,47 @@ class Api:
             tables_created = []
             total_rows = 0
 
-            for current_sheet, df in all_sheets.items():
-                clean_table_name = self._clean_ascii(str(current_sheet)) or "table"
+            try:
+                for current_sheet, df in all_sheets.items():
+                    clean_table_name = self._clean_ascii(str(current_sheet)) or "table"
 
-                try:
-                    df = df.dropna(how="all")
+                    try:
+                        df = df.dropna(how="all")
 
-                    if any(str(col).lower().startswith("unnamed") for col in df.columns):
-                        if len(df) > 0:
-                            new_headers = df.iloc[0].fillna("colonne_inconnue").astype(str).tolist()
-                            cleaned_headers = []
-                            seen = {}
-                            for h in new_headers:
-                                h_clean = self._clean_ascii(h) or "col"
-                                if h_clean in seen:
-                                    seen[h_clean] += 1
-                                    h_clean = f"{h_clean}_{seen[h_clean]}"
-                                else:
-                                    seen[h_clean] = 0
-                                cleaned_headers.append(h_clean)
-                            df.columns = cleaned_headers
-                            df = df.drop(df.index[0])
+                        if any(str(col).lower().startswith("unnamed") for col in df.columns):
+                            if len(df) > 0:
+                                new_headers = df.iloc[0].fillna("colonne_inconnue").astype(str).tolist()
+                                cleaned_headers = []
+                                seen = {}
+                                for h in new_headers:
+                                    h_clean = self._clean_ascii(h) or "col"
+                                    if h_clean in seen:
+                                        seen[h_clean] += 1
+                                        h_clean = f"{h_clean}_{seen[h_clean]}"
+                                    else:
+                                        seen[h_clean] = 0
+                                    cleaned_headers.append(h_clean)
+                                df.columns = cleaned_headers
+                                df = df.drop(df.index[0])
 
-                    for col in df.columns:
-                        if pd.api.types.is_numeric_dtype(df[col]):
-                            df[col] = df[col].fillna(0)
-                        elif pd.api.types.is_datetime64_any_dtype(df[col]):
-                            df[col] = pd.to_datetime(df[col]).dt.date
-                            df[col] = df[col].fillna(pd.Timestamp.now().date())
-                        else:
-                            df[col] = df[col].fillna("Non specifie")
+                        for col in df.columns:
+                            if pd.api.types.is_numeric_dtype(df[col]):
+                                df[col] = df[col].fillna(0)
+                            elif pd.api.types.is_datetime64_any_dtype(df[col]):
+                                df[col] = pd.to_datetime(df[col]).dt.date
+                                df[col] = df[col].fillna(pd.Timestamp.now().date())
+                            else:
+                                df[col] = df[col].fillna("Non specifie")
 
-                    df.columns = [self._clean_ascii(str(col)) or "col" for col in df.columns]
-                    df.to_sql(clean_table_name, conn, if_exists="replace", index=False)
-                    tables_created.append(clean_table_name)
-                    total_rows += len(df)
-                except Exception as sheet_err:
-                    print(f"[ERREUR IMPORT] Feuille '{current_sheet}' : {sheet_err}")
-                    continue
-
-            conn.close()
+                        df.columns = [self._clean_ascii(str(col)) or "col" for col in df.columns]
+                        df.to_sql(clean_table_name, conn, if_exists="replace", index=False)
+                        tables_created.append(clean_table_name)
+                        total_rows += len(df)
+                    except Exception as sheet_err:
+                        print(f"[ERREUR IMPORT] Feuille '{current_sheet}' : {sheet_err}")
+                        continue
+            finally:
+                self._safe_close_connection(conn)
 
             return {
                 "success": True,
@@ -636,47 +677,49 @@ class Api:
         except Exception as e:
             return {"success": False, "message": f"Erreur lors de la creation : {e}"}
 
+    # ============================================================
+    # EXPORT EXCEL
+    # ============================================================
     def export_database_to_excel_from_path(self, db_path: str, output_excel_path: str):
-        """Export professionnel : chaque table devient une feuille avec mise en forme complete."""
+        """Export professionnel : chaque table devient une feuille."""
         try:
             if not db_path or not os.path.exists(db_path):
                 return {"success": False, "message": "Base de donnees introuvable."}
 
             conn = self._connect_db(db_path)
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';"
-            )
-            tables = [
-                row[0]
-                for row in cursor.fetchall()
-                if row[0] != "sqlite_sequence"
-            ]
+            try:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';"
+                )
+                tables = [
+                    row[0] for row in cursor.fetchall() if row[0] != "sqlite_sequence"
+                ]
 
-            if not tables:
-                conn.close()
-                return {"success": False, "message": "Aucune table dans cette base."}
+                if not tables:
+                    return {"success": False, "message": "Aucune table dans cette base."}
 
-            tables_ordered = [t for t in tables if t != "listes_meres"]
-            if "listes_meres" in tables:
-                tables_ordered.append("listes_meres")
+                tables_ordered = [t for t in tables if t != "listes_meres"]
+                if "listes_meres" in tables:
+                    tables_ordered.append("listes_meres")
 
-            with pd.ExcelWriter(output_excel_path, engine="openpyxl") as writer:
-                for table in tables_ordered:
-                    df = pd.read_sql_query(f'SELECT * FROM "{table}"', conn)
+                with pd.ExcelWriter(output_excel_path, engine="openpyxl") as writer:
+                    for table in tables_ordered:
+                        df = pd.read_sql_query(f'SELECT * FROM "{table}"', conn)
 
-                    if "id" in df.columns:
-                        df = df.drop(columns=["id"])
+                        if "id" in df.columns:
+                            df = df.drop(columns=["id"])
 
-                    for col in df.columns:
-                        if pd.api.types.is_datetime64_any_dtype(df[col]):
-                            df[col] = df[col].dt.date
+                        for col in df.columns:
+                            if pd.api.types.is_datetime64_any_dtype(df[col]):
+                                df[col] = df[col].dt.date
 
-                    sheet_name = table[:31] if len(table) <= 31 else table[:31]
-                    df.to_excel(writer, sheet_name=sheet_name, index=False)
-                    self._apply_professional_formatting(writer, sheet_name, df)
+                        sheet_name = table[:31] if len(table) <= 31 else table[:31]
+                        df.to_excel(writer, sheet_name=sheet_name, index=False)
+                        self._apply_professional_formatting(writer, sheet_name, df)
+            finally:
+                self._safe_close_connection(conn)
 
-            conn.close()
             return {
                 "success": True,
                 "message": f"Exportation professionnelle reussie vers {output_excel_path}",
@@ -685,43 +728,43 @@ class Api:
             return {"success": False, "message": str(e)}
 
     def export_database_to_excel(self, output_excel_path: str, file_path: str = None):
-        """Export professionnel : chaque table = feuille, attributs = en-tetes."""
+        """Export professionnel de la base active."""
         try:
             db_path = self._get_db_path(file_path)
             if not db_path:
                 return {"success": False, "message": "Aucune base active."}
 
             conn = self._connect_db(db_path)
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';"
-            )
-            tables = [
-                row[0]
-                for row in cursor.fetchall()
-                if row[0] != "sqlite_sequence"
-            ]
+            try:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';"
+                )
+                tables = [
+                    row[0] for row in cursor.fetchall() if row[0] != "sqlite_sequence"
+                ]
 
-            tables_ordered = [t for t in tables if t != "listes_meres"]
-            if "listes_meres" in tables:
-                tables_ordered.append("listes_meres")
+                tables_ordered = [t for t in tables if t != "listes_meres"]
+                if "listes_meres" in tables:
+                    tables_ordered.append("listes_meres")
 
-            with pd.ExcelWriter(output_excel_path, engine="openpyxl") as writer:
-                for table in tables_ordered:
-                    df = pd.read_sql_query(f'SELECT * FROM "{table}"', conn)
+                with pd.ExcelWriter(output_excel_path, engine="openpyxl") as writer:
+                    for table in tables_ordered:
+                        df = pd.read_sql_query(f'SELECT * FROM "{table}"', conn)
 
-                    if "id" in df.columns:
-                        df = df.drop(columns=["id"])
+                        if "id" in df.columns:
+                            df = df.drop(columns=["id"])
 
-                    for col in df.columns:
-                        if pd.api.types.is_datetime64_any_dtype(df[col]):
-                            df[col] = df[col].dt.date
+                        for col in df.columns:
+                            if pd.api.types.is_datetime64_any_dtype(df[col]):
+                                df[col] = df[col].dt.date
 
-                    sheet_name = table[:31] if len(table) <= 31 else table[:31]
-                    df.to_excel(writer, sheet_name=sheet_name, index=False)
-                    self._apply_professional_formatting(writer, sheet_name, df)
+                        sheet_name = table[:31] if len(table) <= 31 else table[:31]
+                        df.to_excel(writer, sheet_name=sheet_name, index=False)
+                        self._apply_professional_formatting(writer, sheet_name, df)
+            finally:
+                self._safe_close_connection(conn)
 
-            conn.close()
             return {
                 "success": True,
                 "message": f"Exportation reussie vers {output_excel_path}",
@@ -730,7 +773,7 @@ class Api:
             return {"success": False, "message": str(e)}
 
     # ============================================================
-    # CREATION DES LISTES MERES (OPTIMISEE + exclusion nom vide + fusion vides)
+    # CREATION DES LISTES MERES
     # ============================================================
     def create_master_list(self, file_path: str = None):
         """
@@ -740,11 +783,11 @@ class Api:
         - Critere doublon avec CIN rempli : CIN + NOM + COMMUNE + FKT
         - Critere doublon avec CIN vide : NOM + COMMUNE + FKT + ANNEE + H_F
         - Fusion : completer uniquement les vides de la reference
-        - Conflit (H_F differe) : prendre la premiere occurrence (reference)
+        - Conflit : prendre la premiere occurrence (reference)
         - Observation : nom de la 1ere table uniquement
         - CIN vide : afficher "CIN non specifie"
         - Ordre des tables : ordre alphabetique
-        - EXCLUSION : les lignes dont nom_et_prenoms est vide sont ignorees
+        - EXCLUSION : lignes dont nom_et_prenoms est vide
         """
         try:
             db_path = self._get_db_path(file_path)
@@ -757,237 +800,236 @@ class Api:
             except Exception:
                 pass
 
-            time.sleep(0.15)
+            self._release_resources(0.15)
 
             conn = self._connect_db(db_path)
-            cursor = conn.cursor()
+            try:
+                cursor = conn.cursor()
 
-            cursor.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';"
-            )
-            tables = [
-                row[0]
-                for row in cursor.fetchall()
-                if row[0] not in ("sqlite_sequence", "listes_meres")
-            ]
+                cursor.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';"
+                )
+                tables = [
+                    row[0]
+                    for row in cursor.fetchall()
+                    if row[0] not in ("sqlite_sequence", "listes_meres")
+                ]
 
-            if not tables:
-                conn.close()
-                return {"success": False, "message": "Aucune table dans cette base."}
+                if not tables:
+                    return {"success": False, "message": "Aucune table dans cette base."}
 
-            tables = sorted(tables)
+                tables = sorted(tables)
 
-            all_persons = []
-            seen_keys = set()
-            total_lignes_lues = 0
-            total_doublons_ignores = 0
-            total_fusions = 0
-            total_noms_vides_ignores = 0
+                all_persons = []
+                seen_keys = set()
+                total_lignes_lues = 0
+                total_doublons_ignores = 0
+                total_fusions = 0
+                total_noms_vides_ignores = 0
 
-            for table in tables:
-                try:
-                    df = pd.read_sql_query(f'SELECT * FROM "{table}"', conn)
-                    if df.empty:
+                for table in tables:
+                    try:
+                        df = pd.read_sql_query(f'SELECT * FROM "{table}"', conn)
+                        if df.empty:
+                            continue
+
+                        total_lignes_lues += len(df)
+
+                        cin_col = None
+                        nom_col = None
+                        commune_col = None
+                        fkt_col = None
+                        annee_col = None
+                        hf_col = None
+
+                        for c in df.columns:
+                            cl = c.lower()
+                            if "cin" in cl and not cin_col:
+                                cin_col = c
+                            if ("nom" in cl or "prenom" in cl) and not nom_col:
+                                nom_col = c
+                            if "commune" in cl and not commune_col:
+                                commune_col = c
+                            if ("fkt" in cl or "fokontany" in cl) and not fkt_col:
+                                fkt_col = c
+                            if ("annee" in cl and "naissance" in cl) and not annee_col:
+                                annee_col = c
+                            if (cl in ("h_f", "hf", "sexe")) and not hf_col:
+                                hf_col = c
+
+                        region_col = None
+                        district_col = None
+                        filieres_col = None
+                        categorisation_col = None
+                        variete_col = None
+                        opr_col = None
+                        filiation_col = None
+                        pole_col = None
+
+                        for c in df.columns:
+                            cl = c.lower()
+                            if cl == "region":
+                                region_col = c
+                            elif cl == "district":
+                                district_col = c
+                            elif cl in ("filieres", "filiere"):
+                                filieres_col = c
+                            elif "categorisation" in cl or "categoris" in cl:
+                                categorisation_col = c
+                            elif cl == "variete":
+                                variete_col = c
+                            elif cl == "opr":
+                                opr_col = c
+                            elif "filiation" in cl:
+                                filiation_col = c
+                            elif "pole" in cl or "podev" in cl:
+                                pole_col = c
+
+                        for idx, row in df.iterrows():
+                            cin_val = str(row.get(cin_col, "") or "").strip().upper()
+                            cin_clean = re.sub(r"[^A-Z0-9]", "", cin_val)
+
+                            nom_val = str(row.get(nom_col, "") or "").strip().upper()
+                            commune_val = str(row.get(commune_col, "") or "").strip().upper()
+                            fkt_val = str(row.get(fkt_col, "") or "").strip().upper()
+                            annee_val = str(row.get(annee_col, "") or "").strip()
+                            hf_val = str(row.get(hf_col, "") or "").strip().upper()
+
+                            # Exclure les lignes sans nom_et_prenoms
+                            if not nom_val or nom_val in ("NON SPECIFIE", "NAN", "NONE", "NULL"):
+                                total_noms_vides_ignores += 1
+                                continue
+
+                            if not cin_clean and not commune_val and not fkt_val:
+                                continue
+
+                            if cin_clean and len(cin_clean) >= 3:
+                                key = f"CIN:{cin_clean}|{nom_val}|{commune_val}|{fkt_val}"
+                            else:
+                                key = f"NOCIN:{nom_val}|{commune_val}|{fkt_val}|{annee_val}|{hf_val}"
+
+                            if key in seen_keys:
+                                total_doublons_ignores += 1
+                                for person in all_persons:
+                                    if person.get("_key") == key:
+                                        def complete_field(field_name, value):
+                                            if value and (
+                                                not person.get(field_name)
+                                                or person.get(field_name) == "Non specifie"
+                                                or person.get(field_name) == "CIN non specifie"
+                                                or str(person.get(field_name)).upper()
+                                                in ("NAN", "NONE", "NULL")
+                                            ):
+                                                person[field_name] = value
+                                                return True
+                                            return False
+
+                                        if complete_field("cin", cin_val if cin_clean else ""):
+                                            total_fusions += 1
+                                        if complete_field("region", row.get(region_col, "")):
+                                            total_fusions += 1
+                                        if complete_field("district", row.get(district_col, "")):
+                                            total_fusions += 1
+                                        if complete_field("filieres", row.get(filieres_col, "")):
+                                            total_fusions += 1
+                                        if complete_field("h_f", hf_val):
+                                            total_fusions += 1
+                                        if complete_field("annee_de_naissance", annee_val):
+                                            total_fusions += 1
+                                        if complete_field("categorisation_eaf", row.get(categorisation_col, "")):
+                                            total_fusions += 1
+                                        if complete_field("variete", row.get(variete_col, "")):
+                                            total_fusions += 1
+                                        if complete_field("opr", row.get(opr_col, "")):
+                                            total_fusions += 1
+                                        if complete_field("filiation_menage", row.get(filiation_col, "")):
+                                            total_fusions += 1
+                                        if complete_field("pole_de_developpement", row.get(pole_col, "")):
+                                            total_fusions += 1
+                                        break
+                                continue
+
+                            seen_keys.add(key)
+
+                            person = {
+                                "_key": key,
+                                "region": row.get(region_col, "") if region_col else "",
+                                "district": row.get(district_col, "") if district_col else "",
+                                "commune": row.get(commune_col, "") if commune_col else "",
+                                "fkt": row.get(fkt_col, "") if fkt_col else "",
+                                "nom_et_prenoms": row.get(nom_col, "") if nom_col else "",
+                                "h_f": hf_val,
+                                "filieres": row.get(filieres_col, "") if filieres_col else "",
+                                "cin": cin_val if cin_clean else "CIN non specifie",
+                                "annee_de_naissance": annee_val,
+                                "categorisation_eaf": row.get(categorisation_col, "") if categorisation_col else "",
+                                "variete": row.get(variete_col, "") if variete_col else "",
+                                "opr": row.get(opr_col, "") if opr_col else "",
+                                "filiation_menage": row.get(filiation_col, "") if filiation_col else "",
+                                "pole_de_developpement": row.get(pole_col, "") if pole_col else "",
+                                "observation": table,
+                            }
+
+                            all_persons.append(person)
+
+                    except Exception as e:
+                        print(f"[WARN] Erreur lecture table '{table}' : {e}")
                         continue
 
-                    total_lignes_lues += len(df)
+                if not all_persons:
+                    return {
+                        "success": False,
+                        "message": "Aucune personne valide trouvee (toutes les lignes ont un nom vide ou sont des doublons).",
+                    }
 
-                    cin_col = None
-                    nom_col = None
-                    commune_col = None
-                    fkt_col = None
-                    annee_col = None
-                    hf_col = None
-
-                    for c in df.columns:
-                        cl = c.lower()
-                        if "cin" in cl and not cin_col:
-                            cin_col = c
-                        if ("nom" in cl or "prenom" in cl) and not nom_col:
-                            nom_col = c
-                        if "commune" in cl and not commune_col:
-                            commune_col = c
-                        if ("fkt" in cl or "fokontany" in cl) and not fkt_col:
-                            fkt_col = c
-                        if ("annee" in cl and "naissance" in cl) and not annee_col:
-                            annee_col = c
-                        if (cl in ("h_f", "hf", "sexe")) and not hf_col:
-                            hf_col = c
-
-                    region_col = None
-                    district_col = None
-                    filieres_col = None
-                    categorisation_col = None
-                    variete_col = None
-                    opr_col = None
-                    filiation_col = None
-                    pole_col = None
-
-                    for c in df.columns:
-                        cl = c.lower()
-                        if cl == "region":
-                            region_col = c
-                        elif cl == "district":
-                            district_col = c
-                        elif cl in ("filieres", "filiere"):
-                            filieres_col = c
-                        elif "categorisation" in cl or "categoris" in cl:
-                            categorisation_col = c
-                        elif cl == "variete":
-                            variete_col = c
-                        elif cl == "opr":
-                            opr_col = c
-                        elif "filiation" in cl:
-                            filiation_col = c
-                        elif "pole" in cl or "podev" in cl:
-                            pole_col = c
-
-                    for idx, row in df.iterrows():
-                        cin_val = str(row.get(cin_col, "") or "").strip().upper()
-                        cin_clean = re.sub(r"[^A-Z0-9]", "", cin_val)
-
-                        nom_val = str(row.get(nom_col, "") or "").strip().upper()
-                        commune_val = str(row.get(commune_col, "") or "").strip().upper()
-                        fkt_val = str(row.get(fkt_col, "") or "").strip().upper()
-                        annee_val = str(row.get(annee_col, "") or "").strip()
-                        hf_val = str(row.get(hf_col, "") or "").strip().upper()
-
-                        # Ignorer les lignes sans nom_et_prenoms
-                        if not nom_val or nom_val in ("NON SPECIFIE", "NAN", "NONE", "NULL"):
-                            total_noms_vides_ignores += 1
-                            continue
-
-                        if not cin_clean and not commune_val and not fkt_val:
-                            continue
-
-                        if cin_clean and len(cin_clean) >= 3:
-                            key = f"CIN:{cin_clean}|{nom_val}|{commune_val}|{fkt_val}"
-                        else:
-                            key = f"NOCIN:{nom_val}|{commune_val}|{fkt_val}|{annee_val}|{hf_val}"
-
-                        if key in seen_keys:
-                            total_doublons_ignores += 1
-                            # FUSION : completer uniquement les vides
-                            for person in all_persons:
-                                if person.get("_key") == key:
-                                    def complete_field(field_name, value):
-                                        if value and (
-                                            not person.get(field_name)
-                                            or person.get(field_name) == "Non specifie"
-                                            or person.get(field_name) == "CIN non specifie"
-                                            or str(person.get(field_name)).upper()
-                                            in ("NAN", "NONE", "NULL")
-                                        ):
-                                            person[field_name] = value
-                                            return True
-                                        return False
-
-                                    if complete_field("cin", cin_val if cin_clean else ""):
-                                        total_fusions += 1
-                                    if complete_field("region", row.get(region_col, "")):
-                                        total_fusions += 1
-                                    if complete_field("district", row.get(district_col, "")):
-                                        total_fusions += 1
-                                    if complete_field("filieres", row.get(filieres_col, "")):
-                                        total_fusions += 1
-                                    if complete_field("h_f", hf_val):
-                                        total_fusions += 1
-                                    if complete_field("annee_de_naissance", annee_val):
-                                        total_fusions += 1
-                                    if complete_field("categorisation_eaf", row.get(categorisation_col, "")):
-                                        total_fusions += 1
-                                    if complete_field("variete", row.get(variete_col, "")):
-                                        total_fusions += 1
-                                    if complete_field("opr", row.get(opr_col, "")):
-                                        total_fusions += 1
-                                    if complete_field("filiation_menage", row.get(filiation_col, "")):
-                                        total_fusions += 1
-                                    if complete_field("pole_de_developpement", row.get(pole_col, "")):
-                                        total_fusions += 1
-                                    break
-                            continue
-
-                        seen_keys.add(key)
-
-                        person = {
-                            "_key": key,
-                            "region": row.get(region_col, "") if region_col else "",
-                            "district": row.get(district_col, "") if district_col else "",
-                            "commune": row.get(commune_col, "") if commune_col else "",
-                            "fkt": row.get(fkt_col, "") if fkt_col else "",
-                            "nom_et_prenoms": row.get(nom_col, "") if nom_col else "",
-                            "h_f": hf_val,
-                            "filieres": row.get(filieres_col, "") if filieres_col else "",
-                            "cin": cin_val if cin_clean else "CIN non specifie",
-                            "annee_de_naissance": annee_val,
-                            "categorisation_eaf": row.get(categorisation_col, "") if categorisation_col else "",
-                            "variete": row.get(variete_col, "") if variete_col else "",
-                            "opr": row.get(opr_col, "") if opr_col else "",
-                            "filiation_menage": row.get(filiation_col, "") if filiation_col else "",
-                            "pole_de_developpement": row.get(pole_col, "") if pole_col else "",
-                            "observation": table,
-                        }
-
-                        all_persons.append(person)
-
-                except Exception as e:
-                    print(f"[WARN] Erreur lecture table '{table}' : {e}")
-                    continue
-
-            if not all_persons:
-                conn.close()
-                return {
-                    "success": False,
-                    "message": "Aucune personne valide trouvee (toutes les lignes ont un nom vide ou sont des doublons).",
-                }
-
-            cursor.execute('DROP TABLE IF EXISTS "listes_meres"')
-            cursor.execute('''
-                CREATE TABLE "listes_meres" (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    region TEXT,
-                    district TEXT,
-                    commune TEXT,
-                    fkt TEXT,
-                    nom_et_prenoms TEXT,
-                    h_f TEXT,
-                    filieres TEXT,
-                    cin TEXT,
-                    annee_de_naissance TEXT,
-                    categorisation_eaf TEXT,
-                    variete TEXT,
-                    opr TEXT,
-                    filiation_menage TEXT,
-                    pole_de_developpement TEXT,
-                    observation TEXT
-                )
-            ''')
-
-            for p in all_persons:
+                cursor.execute('DROP TABLE IF EXISTS "listes_meres"')
                 cursor.execute('''
-                    INSERT INTO "listes_meres"
-                    (region, district, commune, fkt, nom_et_prenoms, h_f, filieres, cin, annee_de_naissance, categorisation_eaf, variete, opr, filiation_menage, pole_de_developpement, observation)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
-                    p.get("region", ""),
-                    p.get("district", ""),
-                    p.get("commune", ""),
-                    p.get("fkt", ""),
-                    p.get("nom_et_prenoms", ""),
-                    p.get("h_f", ""),
-                    p.get("filieres", ""),
-                    p.get("cin", ""),
-                    p.get("annee_de_naissance", ""),
-                    p.get("categorisation_eaf", ""),
-                    p.get("variete", ""),
-                    p.get("opr", ""),
-                    p.get("filiation_menage", ""),
-                    p.get("pole_de_developpement", ""),
-                    p.get("observation", ""),
-                ))
+                    CREATE TABLE "listes_meres" (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        region TEXT,
+                        district TEXT,
+                        commune TEXT,
+                        fkt TEXT,
+                        nom_et_prenoms TEXT,
+                        h_f TEXT,
+                        filieres TEXT,
+                        cin TEXT,
+                        annee_de_naissance TEXT,
+                        categorisation_eaf TEXT,
+                        variete TEXT,
+                        opr TEXT,
+                        filiation_menage TEXT,
+                        pole_de_developpement TEXT,
+                        observation TEXT
+                    )
+                ''')
 
-            conn.commit()
-            conn.close()
+                for p in all_persons:
+                    cursor.execute('''
+                        INSERT INTO "listes_meres"
+                        (region, district, commune, fkt, nom_et_prenoms, h_f, filieres, cin, annee_de_naissance, categorisation_eaf, variete, opr, filiation_menage, pole_de_developpement, observation)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        p.get("region", ""),
+                        p.get("district", ""),
+                        p.get("commune", ""),
+                        p.get("fkt", ""),
+                        p.get("nom_et_prenoms", ""),
+                        p.get("h_f", ""),
+                        p.get("filieres", ""),
+                        p.get("cin", ""),
+                        p.get("annee_de_naissance", ""),
+                        p.get("categorisation_eaf", ""),
+                        p.get("variete", ""),
+                        p.get("opr", ""),
+                        p.get("filiation_menage", ""),
+                        p.get("pole_de_developpement", ""),
+                        p.get("observation", ""),
+                    ))
+
+                conn.commit()
+            finally:
+                self._safe_close_connection(conn)
 
             return {
                 "success": True,
@@ -1011,7 +1053,7 @@ class Api:
             return {"success": False, "message": f"Erreur lors de la creation : {e}"}
 
     # ============================================================
-    # REQUETES STATISTIQUES PRE-DEFINIES
+    # REQUETES STATISTIQUES
     # ============================================================
     def execute_statistical_query(self, query_type: str, params: Dict[str, Any] = None, file_path: str = None):
         """Execute des requetes statistiques predefinies."""
@@ -1026,361 +1068,360 @@ class Api:
             conn = self._connect_db(db_path)
             conn.row_factory = sqlite3.Row
 
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';"
-            )
-            tables = [
-                row[0]
-                for row in cursor.fetchall()
-                if row[0] not in ("sqlite_sequence",)
-            ]
+            try:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';"
+                )
+                tables = [
+                    row[0] for row in cursor.fetchall() if row[0] not in ("sqlite_sequence",)
+                ]
 
-            data = []
+                data = []
 
-            if query_type == "femmes_par_tranche_age":
-                age_min = int(params.get("age_min", 0))
-                age_max = int(params.get("age_max", 100))
-                buckets = {
-                    "0-14": 0, "15-24": 0, "25-34": 0,
-                    "35-44": 0, "45-54": 0, "55-64": 0, "65+": 0,
-                }
-                current_year = datetime.now().year
+                if query_type == "femmes_par_tranche_age":
+                    age_min = int(params.get("age_min", 0))
+                    age_max = int(params.get("age_max", 100))
+                    buckets = {
+                        "0-14": 0, "15-24": 0, "25-34": 0,
+                        "35-44": 0, "45-54": 0, "55-64": 0, "65+": 0,
+                    }
+                    current_year = datetime.now().year
 
-                for table in tables:
-                    try:
-                        df = pd.read_sql_query(f'SELECT * FROM "{table}"', conn)
-                        if df.empty:
-                            continue
-
-                        hf_col = None
-                        annee_col = None
-                        for c in df.columns:
-                            cl = c.lower()
-                            if hf_col is None and (cl == "h_f" or cl == "hf" or cl == "sexe"):
-                                hf_col = c
-                            if annee_col is None and ("annee" in cl and "naissance" in cl):
-                                annee_col = c
-
-                        if not hf_col or not annee_col:
-                            continue
-
-                        for idx, row in df.iterrows():
-                            hf = str(row[hf_col] or "").strip().upper()
-                            is_female = hf in ("F", "FEMME", "FEMININ", "FEMALE", "2")
-                            if not is_female:
+                    for table in tables:
+                        try:
+                            df = pd.read_sql_query(f'SELECT * FROM "{table}"', conn)
+                            if df.empty:
                                 continue
 
-                            try:
-                                annee = int(float(str(row[annee_col] or 0)))
-                                if annee < 1900 or annee > current_year:
+                            hf_col = None
+                            annee_col = None
+                            for c in df.columns:
+                                cl = c.lower()
+                                if hf_col is None and (cl == "h_f" or cl == "hf" or cl == "sexe"):
+                                    hf_col = c
+                                if annee_col is None and ("annee" in cl and "naissance" in cl):
+                                    annee_col = c
+
+                            if not hf_col or not annee_col:
+                                continue
+
+                            for idx, row in df.iterrows():
+                                hf = str(row[hf_col] or "").strip().upper()
+                                is_female = hf in ("F", "FEMME", "FEMININ", "FEMALE", "2")
+                                if not is_female:
                                     continue
-                                age = current_year - annee
-                            except Exception:
+
+                                try:
+                                    annee = int(float(str(row[annee_col] or 0)))
+                                    if annee < 1900 or annee > current_year:
+                                        continue
+                                    age = current_year - annee
+                                except Exception:
+                                    continue
+
+                                if age < age_min or age > age_max:
+                                    continue
+
+                                if age <= 14:
+                                    buckets["0-14"] += 1
+                                elif age <= 24:
+                                    buckets["15-24"] += 1
+                                elif age <= 34:
+                                    buckets["25-34"] += 1
+                                elif age <= 44:
+                                    buckets["35-44"] += 1
+                                elif age <= 54:
+                                    buckets["45-54"] += 1
+                                elif age <= 64:
+                                    buckets["55-64"] += 1
+                                else:
+                                    buckets["65+"] += 1
+                        except Exception as e:
+                            print(f"[WARN] {table} : {e}")
+                            continue
+
+                    for tranche, count in buckets.items():
+                        data.append({"tranche_age": tranche, "nombre_femmes": count})
+
+                elif query_type == "personnes_par_lieu":
+                    lieu_type = params.get("lieu_type", "commune")
+                    counts = {}
+                    for table in tables:
+                        try:
+                            df = pd.read_sql_query(f'SELECT * FROM "{table}"', conn)
+                            if df.empty:
                                 continue
 
-                            if age < age_min or age > age_max:
+                            lieu_col = None
+                            for c in df.columns:
+                                cl = c.lower()
+                                if lieu_type in cl:
+                                    lieu_col = c
+                                    break
+
+                            if not lieu_col:
                                 continue
 
-                            if age <= 14:
-                                buckets["0-14"] += 1
-                            elif age <= 24:
-                                buckets["15-24"] += 1
-                            elif age <= 34:
-                                buckets["25-34"] += 1
-                            elif age <= 44:
-                                buckets["35-44"] += 1
-                            elif age <= 54:
-                                buckets["45-54"] += 1
-                            elif age <= 64:
-                                buckets["55-64"] += 1
-                            else:
-                                buckets["65+"] += 1
-                    except Exception as e:
-                        print(f"[WARN] {table} : {e}")
-                        continue
-
-                for tranche, count in buckets.items():
-                    data.append({"tranche_age": tranche, "nombre_femmes": count})
-
-            elif query_type == "personnes_par_lieu":
-                lieu_type = params.get("lieu_type", "commune")
-                counts = {}
-                for table in tables:
-                    try:
-                        df = pd.read_sql_query(f'SELECT * FROM "{table}"', conn)
-                        if df.empty:
+                            for val in df[lieu_col]:
+                                v = str(val or "").strip()
+                                if v and v.lower() != "nan" and v.lower() != "non specifie":
+                                    counts[v] = counts.get(v, 0) + 1
+                        except Exception:
                             continue
 
-                        lieu_col = None
-                        for c in df.columns:
-                            cl = c.lower()
-                            if lieu_type in cl:
-                                lieu_col = c
-                                break
+                    sorted_counts = sorted(counts.items(), key=lambda x: -x[1])
+                    for lieu, count in sorted_counts:
+                        data.append({"lieu": lieu, "nombre_personnes": count})
 
-                        if not lieu_col:
-                            continue
-
-                        for val in df[lieu_col]:
-                            v = str(val or "").strip()
-                            if v and v.lower() != "nan" and v.lower() != "non specifie":
-                                counts[v] = counts.get(v, 0) + 1
-                    except Exception:
-                        continue
-
-                sorted_counts = sorted(counts.items(), key=lambda x: -x[1])
-                for lieu, count in sorted_counts:
-                    data.append({"lieu": lieu, "nombre_personnes": count})
-
-            elif query_type == "superficie_par_personne":
-                superficies = {}
-                for table in tables:
-                    try:
-                        df = pd.read_sql_query(f'SELECT * FROM "{table}"', conn)
-                        if df.empty:
-                            continue
-
-                        nom_col = None
-                        cin_col = None
-                        sup_col = None
-
-                        for c in df.columns:
-                            cl = c.lower()
-                            if "nom" in cl and not nom_col:
-                                nom_col = c
-                            if "cin" in cl and not cin_col:
-                                cin_col = c
-                            if (
-                                "superficie" in cl
-                                or "superf" in cl
-                                or "surface" in cl
-                                or cl == "ha"
-                            ):
-                                sup_col = c
-
-                        if not sup_col:
-                            continue
-
-                        for idx, row in df.iterrows():
-                            key = (
-                                str(row.get(nom_col, "") or "").strip()
-                                + "|"
-                                + str(row.get(cin_col, "") or "").strip()
-                            )
-                            try:
-                                sup = float(str(row[sup_col] or 0).replace(",", "."))
-                            except Exception:
-                                sup = 0
-                            superficies[key] = superficies.get(key, 0) + sup
-                    except Exception:
-                        continue
-
-                sorted_sup = sorted(superficies.items(), key=lambda x: -x[1])
-                for key, sup in sorted_sup[:100]:
-                    parts = key.split("|")
-                    data.append({
-                        "nom": parts[0] if len(parts) > 0 else "",
-                        "cin": parts[1] if len(parts) > 1 else "",
-                        "superficie_totale": round(sup, 2),
-                    })
-
-            elif query_type == "hommes_femmes":
-                counts = {"H": 0, "F": 0, "Autre": 0}
-                for table in tables:
-                    try:
-                        df = pd.read_sql_query(f'SELECT * FROM "{table}"', conn)
-                        if df.empty:
-                            continue
-
-                        hf_col = None
-                        for c in df.columns:
-                            cl = c.lower()
-                            if cl in ("h_f", "hf", "sexe"):
-                                hf_col = c
-                                break
-
-                        if not hf_col:
-                            continue
-
-                        for val in df[hf_col]:
-                            v = str(val or "").strip().upper()
-                            if v in ("H", "HOMME", "MASCULIN", "MALE", "1"):
-                                counts["H"] += 1
-                            elif v in ("F", "FEMME", "FEMININ", "FEMALE", "2"):
-                                counts["F"] += 1
-                            elif v:
-                                counts["Autre"] += 1
-                    except Exception:
-                        continue
-
-                for sexe, count in counts.items():
-                    data.append({"sexe": sexe, "nombre": count})
-
-            elif query_type == "personnes_par_filiere":
-                counts = {}
-                for table in tables:
-                    try:
-                        df = pd.read_sql_query(f'SELECT * FROM "{table}"', conn)
-                        if df.empty:
-                            continue
-
-                        fil_col = None
-                        for c in df.columns:
-                            cl = c.lower()
-                            if "filiere" in cl:
-                                fil_col = c
-                                break
-
-                        if not fil_col:
-                            continue
-
-                        for val in df[fil_col]:
-                            v = str(val or "").strip()
-                            if v and v.lower() != "nan":
-                                counts[v] = counts.get(v, 0) + 1
-                    except Exception:
-                        continue
-
-                sorted_c = sorted(counts.items(), key=lambda x: -x[1])
-                for fil, count in sorted_c:
-                    data.append({"filiere": fil, "nombre_personnes": count})
-
-            elif query_type == "personnes_par_commune":
-                counts = {}
-                for table in tables:
-                    try:
-                        df = pd.read_sql_query(f'SELECT * FROM "{table}"', conn)
-                        if df.empty:
-                            continue
-
-                        comm_col = None
-                        for c in df.columns:
-                            cl = c.lower()
-                            if "commune" in cl:
-                                comm_col = c
-                                break
-
-                        if not comm_col:
-                            continue
-
-                        for val in df[comm_col]:
-                            v = str(val or "").strip()
-                            if v and v.lower() != "nan":
-                                counts[v] = counts.get(v, 0) + 1
-                    except Exception:
-                        continue
-
-                sorted_c = sorted(counts.items(), key=lambda x: -x[1])
-                for comm, count in sorted_c:
-                    data.append({"commune": comm, "nombre_personnes": count})
-
-            elif query_type == "personnes_par_categorisation":
-                counts = {}
-                for table in tables:
-                    try:
-                        df = pd.read_sql_query(f'SELECT * FROM "{table}"', conn)
-                        if df.empty:
-                            continue
-
-                        cat_col = None
-                        for c in df.columns:
-                            cl = c.lower()
-                            if "categorisation" in cl or "categoris" in cl:
-                                cat_col = c
-                                break
-
-                        if not cat_col:
-                            continue
-
-                        for val in df[cat_col]:
-                            v = str(val or "").strip()
-                            if v and v.lower() != "nan":
-                                counts[v] = counts.get(v, 0) + 1
-                    except Exception:
-                        continue
-
-                sorted_c = sorted(counts.items(), key=lambda x: -x[1])
-                for cat, count in sorted_c:
-                    data.append({"categorisation": cat, "nombre_personnes": count})
-
-            elif query_type == "age_moyen":
-                current_year = datetime.now().year
-                total_age = 0
-                count = 0
-
-                for table in tables:
-                    try:
-                        df = pd.read_sql_query(f'SELECT * FROM "{table}"', conn)
-                        if df.empty:
-                            continue
-
-                        annee_col = None
-                        for c in df.columns:
-                            cl = c.lower()
-                            if "annee" in cl and "naissance" in cl:
-                                annee_col = c
-                                break
-
-                        if not annee_col:
-                            continue
-
-                        for val in df[annee_col]:
-                            try:
-                                annee = int(float(str(val)))
-                                if 1900 < annee <= current_year:
-                                    total_age += current_year - annee
-                                    count += 1
-                            except Exception:
+                elif query_type == "superficie_par_personne":
+                    superficies = {}
+                    for table in tables:
+                        try:
+                            df = pd.read_sql_query(f'SELECT * FROM "{table}"', conn)
+                            if df.empty:
                                 continue
-                    except Exception:
-                        continue
 
-                avg = round(total_age / count, 1) if count > 0 else 0
-                data.append({"age_moyen": avg, "total_personnes": count})
+                            nom_col = None
+                            cin_col = None
+                            sup_col = None
 
-            elif query_type == "superficie_totale":
-                total = 0
-                for table in tables:
-                    try:
-                        df = pd.read_sql_query(f'SELECT * FROM "{table}"', conn)
-                        if df.empty:
-                            continue
+                            for c in df.columns:
+                                cl = c.lower()
+                                if "nom" in cl and not nom_col:
+                                    nom_col = c
+                                if "cin" in cl and not cin_col:
+                                    cin_col = c
+                                if (
+                                    "superficie" in cl
+                                    or "superf" in cl
+                                    or "surface" in cl
+                                    or cl == "ha"
+                                ):
+                                    sup_col = c
 
-                        sup_col = None
-                        for c in df.columns:
-                            cl = c.lower()
-                            if (
-                                "superficie" in cl
-                                or "superf" in cl
-                                or "surface" in cl
-                            ):
-                                sup_col = c
-                                break
-
-                        if not sup_col:
-                            continue
-
-                        for val in df[sup_col]:
-                            try:
-                                total += float(str(val).replace(",", "."))
-                            except Exception:
+                            if not sup_col:
                                 continue
-                    except Exception:
-                        continue
 
-                data.append({"superficie_totale": round(total, 2)})
+                            for idx, row in df.iterrows():
+                                key = (
+                                    str(row.get(nom_col, "") or "").strip()
+                                    + "|"
+                                    + str(row.get(cin_col, "") or "").strip()
+                                )
+                                try:
+                                    sup = float(str(row[sup_col] or 0).replace(",", "."))
+                                except Exception:
+                                    sup = 0
+                                superficies[key] = superficies.get(key, 0) + sup
+                        except Exception:
+                            continue
 
-            else:
-                conn.close()
-                return {
-                    "success": False,
-                    "message": f"Type de requete inconnu : {query_type}",
-                    "data": [],
-                }
+                    sorted_sup = sorted(superficies.items(), key=lambda x: -x[1])
+                    for key, sup in sorted_sup[:100]:
+                        parts = key.split("|")
+                        data.append({
+                            "nom": parts[0] if len(parts) > 0 else "",
+                            "cin": parts[1] if len(parts) > 1 else "",
+                            "superficie_totale": round(sup, 2),
+                        })
 
-            conn.close()
-            return {"success": True, "data": data, "query_type": query_type}
+                elif query_type == "hommes_femmes":
+                    counts = {"H": 0, "F": 0, "Autre": 0}
+                    for table in tables:
+                        try:
+                            df = pd.read_sql_query(f'SELECT * FROM "{table}"', conn)
+                            if df.empty:
+                                continue
+
+                            hf_col = None
+                            for c in df.columns:
+                                cl = c.lower()
+                                if cl in ("h_f", "hf", "sexe"):
+                                    hf_col = c
+                                    break
+
+                            if not hf_col:
+                                continue
+
+                            for val in df[hf_col]:
+                                v = str(val or "").strip().upper()
+                                if v in ("H", "HOMME", "MASCULIN", "MALE", "1"):
+                                    counts["H"] += 1
+                                elif v in ("F", "FEMME", "FEMININ", "FEMALE", "2"):
+                                    counts["F"] += 1
+                                elif v:
+                                    counts["Autre"] += 1
+                        except Exception:
+                            continue
+
+                    for sexe, count in counts.items():
+                        data.append({"sexe": sexe, "nombre": count})
+
+                elif query_type == "personnes_par_filiere":
+                    counts = {}
+                    for table in tables:
+                        try:
+                            df = pd.read_sql_query(f'SELECT * FROM "{table}"', conn)
+                            if df.empty:
+                                continue
+
+                            fil_col = None
+                            for c in df.columns:
+                                cl = c.lower()
+                                if "filiere" in cl:
+                                    fil_col = c
+                                    break
+
+                            if not fil_col:
+                                continue
+
+                            for val in df[fil_col]:
+                                v = str(val or "").strip()
+                                if v and v.lower() != "nan":
+                                    counts[v] = counts.get(v, 0) + 1
+                        except Exception:
+                            continue
+
+                    sorted_c = sorted(counts.items(), key=lambda x: -x[1])
+                    for fil, count in sorted_c:
+                        data.append({"filiere": fil, "nombre_personnes": count})
+
+                elif query_type == "personnes_par_commune":
+                    counts = {}
+                    for table in tables:
+                        try:
+                            df = pd.read_sql_query(f'SELECT * FROM "{table}"', conn)
+                            if df.empty:
+                                continue
+
+                            comm_col = None
+                            for c in df.columns:
+                                cl = c.lower()
+                                if "commune" in cl:
+                                    comm_col = c
+                                    break
+
+                            if not comm_col:
+                                continue
+
+                            for val in df[comm_col]:
+                                v = str(val or "").strip()
+                                if v and v.lower() != "nan":
+                                    counts[v] = counts.get(v, 0) + 1
+                        except Exception:
+                            continue
+
+                    sorted_c = sorted(counts.items(), key=lambda x: -x[1])
+                    for comm, count in sorted_c:
+                        data.append({"commune": comm, "nombre_personnes": count})
+
+                elif query_type == "personnes_par_categorisation":
+                    counts = {}
+                    for table in tables:
+                        try:
+                            df = pd.read_sql_query(f'SELECT * FROM "{table}"', conn)
+                            if df.empty:
+                                continue
+
+                            cat_col = None
+                            for c in df.columns:
+                                cl = c.lower()
+                                if "categorisation" in cl or "categoris" in cl:
+                                    cat_col = c
+                                    break
+
+                            if not cat_col:
+                                continue
+
+                            for val in df[cat_col]:
+                                v = str(val or "").strip()
+                                if v and v.lower() != "nan":
+                                    counts[v] = counts.get(v, 0) + 1
+                        except Exception:
+                            continue
+
+                    sorted_c = sorted(counts.items(), key=lambda x: -x[1])
+                    for cat, count in sorted_c:
+                        data.append({"categorisation": cat, "nombre_personnes": count})
+
+                elif query_type == "age_moyen":
+                    current_year = datetime.now().year
+                    total_age = 0
+                    count = 0
+
+                    for table in tables:
+                        try:
+                            df = pd.read_sql_query(f'SELECT * FROM "{table}"', conn)
+                            if df.empty:
+                                continue
+
+                            annee_col = None
+                            for c in df.columns:
+                                cl = c.lower()
+                                if "annee" in cl and "naissance" in cl:
+                                    annee_col = c
+                                    break
+
+                            if not annee_col:
+                                continue
+
+                            for val in df[annee_col]:
+                                try:
+                                    annee = int(float(str(val)))
+                                    if 1900 < annee <= current_year:
+                                        total_age += current_year - annee
+                                        count += 1
+                                except Exception:
+                                    continue
+                        except Exception:
+                            continue
+
+                    avg = round(total_age / count, 1) if count > 0 else 0
+                    data.append({"age_moyen": avg, "total_personnes": count})
+
+                elif query_type == "superficie_totale":
+                    total = 0
+                    for table in tables:
+                        try:
+                            df = pd.read_sql_query(f'SELECT * FROM "{table}"', conn)
+                            if df.empty:
+                                continue
+
+                            sup_col = None
+                            for c in df.columns:
+                                cl = c.lower()
+                                if (
+                                    "superficie" in cl
+                                    or "superf" in cl
+                                    or "surface" in cl
+                                ):
+                                    sup_col = c
+                                    break
+
+                            if not sup_col:
+                                continue
+
+                            for val in df[sup_col]:
+                                try:
+                                    total += float(str(val).replace(",", "."))
+                                except Exception:
+                                    continue
+                        except Exception:
+                            continue
+
+                    data.append({"superficie_totale": round(total, 2)})
+
+                else:
+                    return {
+                        "success": False,
+                        "message": f"Type de requete inconnu : {query_type}",
+                        "data": [],
+                    }
+
+                return {"success": True, "data": data, "query_type": query_type}
+            finally:
+                self._safe_close_connection(conn)
 
         except Exception as e:
             import traceback
@@ -1388,7 +1429,7 @@ class Api:
             return {"success": False, "message": str(e), "data": []}
 
     # ============================================================
-    # GESTION DES BASES DE DONNEES
+    # GESTION DES BASES
     # ============================================================
     def get_database_info(self):
         try:
@@ -1401,7 +1442,7 @@ class Api:
 
     def get_data_directory_databases(self):
         try:
-            data_dir = BASE_DIR / "data"
+            data_dir = DATA_DIR
             if not data_dir.exists() or not data_dir.is_dir():
                 return {"success": True, "databases": []}
 
@@ -1432,7 +1473,7 @@ class Api:
 
             db_path = Path(path)
             if not db_path.is_absolute():
-                db_path = BASE_DIR / "data" / db_path.name
+                db_path = DATA_DIR / db_path.name
 
             resolved_path = os.path.abspath(str(db_path))
             if not os.path.exists(resolved_path):
@@ -1442,7 +1483,6 @@ class Api:
                 }
 
             # Si on reouvre la meme base qui est deja ouverte, on la ferme
-            # d'abord pour repartir sur une connexion propre
             if self._active_db_path == resolved_path:
                 try:
                     self._database_service.close_database()
@@ -1450,16 +1490,12 @@ class Api:
                     pass
                 self._active_db_path = None
                 self._last_db_path = None
-                try:
-                    gc.collect()
-                except Exception:
-                    pass
-                time.sleep(0.15)
+                self._release_resources(0.2)
 
             self._is_loading = True
             self._loading_start_time = time.time()
 
-            # Fermer toute base precedemment ouverte (different thread)
+            # Fermer toute base precedemment ouverte
             if self._active_db_path and self._active_db_path != resolved_path:
                 try:
                     self._database_service.close_database()
@@ -1467,11 +1503,7 @@ class Api:
                     pass
                 self._active_db_path = None
                 self._last_db_path = None
-                try:
-                    gc.collect()
-                except Exception:
-                    pass
-                time.sleep(0.15)
+                self._release_resources(0.2)
 
             result = self._database_service.open_database(resolved_path)
 
@@ -1508,13 +1540,9 @@ class Api:
                 result = self._database_service.close_database()
             except Exception:
                 result = {"success": True, "message": "Base fermee."}
-            try:
-                gc.collect()
-            except Exception:
-                pass
-            time.sleep(0.15)
+            self._release_resources(0.15)
             return result
-        except Exception as e:
+        except Exception:
             self._active_db_path = None
             self._last_db_path = None
             self._is_loading = False
@@ -1573,13 +1601,10 @@ class Api:
                 "structure": {},
             }
         finally:
-            if conn is not None:
-                try:
-                    conn.close()
-                except Exception:
-                    pass
+            self._safe_close_connection(conn)
 
     def get_database_table_names(self, file_path: str = None):
+        conn = None
         try:
             db_path = self._get_db_path(file_path)
             if not db_path:
@@ -1593,12 +1618,14 @@ class Api:
             tables = [
                 row[0] for row in cursor.fetchall() if row[0] != "sqlite_sequence"
             ]
-            conn.close()
             return {"success": True, "tables": tables}
         except Exception as e:
             return {"success": False, "message": str(e), "tables": []}
+        finally:
+            self._safe_close_connection(conn)
 
     def get_table_rows(self, table_name: str, file_path: str = None, limit: int = 1000):
+        conn = None
         try:
             db_path = self._get_db_path(file_path)
             if not db_path:
@@ -1609,12 +1636,14 @@ class Api:
             cursor = conn.cursor()
             cursor.execute(f'SELECT * FROM "{table_name}" LIMIT {limit}')
             rows = [dict(row) for row in cursor.fetchall()]
-            conn.close()
             return {"success": True, "data": rows}
         except Exception as e:
             return {"success": False, "message": str(e), "data": []}
+        finally:
+            self._safe_close_connection(conn)
 
     def get_table_columns(self, table_name: str, file_path: str = None):
+        conn = None
         try:
             db_path = self._get_db_path(file_path)
             if not db_path:
@@ -1625,14 +1654,16 @@ class Api:
             escaped_table_name = table_name.replace('"', '""')
             cursor.execute(f'PRAGMA table_info("{escaped_table_name}")')
             columns = [col[1] for col in cursor.fetchall()]
-            conn.close()
             return {"success": True, "columns": columns}
         except Exception as e:
             return {"success": False, "message": str(e), "columns": []}
+        finally:
+            self._safe_close_connection(conn)
 
     def get_table_rows_filtered(
         self, table_name: str, columns: List[str], file_path: str = None
     ):
+        conn = None
         try:
             db_path = self._get_db_path(file_path)
             if not db_path:
@@ -1645,12 +1676,14 @@ class Api:
             cols_sql = ", ".join([f'"{c}"' for c in columns]) if columns else "*"
             cursor.execute(f'SELECT {cols_sql} FROM "{table_name}" LIMIT 500')
             rows = [dict(row) for row in cursor.fetchall()]
-            conn.close()
             return {"success": True, "data": rows}
         except Exception as e:
             return {"success": False, "message": str(e), "data": []}
+        finally:
+            self._safe_close_connection(conn)
 
     def get_distinct_values(self, table_name: str, column: str, file_path: str = None):
+        conn = None
         try:
             db_path = self._get_db_path(file_path)
             if not db_path:
@@ -1668,13 +1701,15 @@ class Api:
                 f'ORDER BY "{safe_col}" LIMIT 200'
             )
             values = [row[0] for row in cursor.fetchall()]
-            conn.close()
 
             return {"success": True, "values": values}
         except Exception as e:
             return {"success": False, "message": str(e), "values": []}
+        finally:
+            self._safe_close_connection(conn)
 
     def search_in_table(self, table_name: str, search_term: str, file_path: str = None):
+        conn = None
         try:
             db_path = self._get_db_path(file_path)
             if not db_path:
@@ -1693,10 +1728,11 @@ class Api:
 
             cursor.execute(query, params)
             rows = [dict(row) for row in cursor.fetchall()]
-            conn.close()
             return {"success": True, "data": rows}
         except Exception as e:
             return {"success": False, "message": str(e), "data": []}
+        finally:
+            self._safe_close_connection(conn)
 
     # ============================================================
     # MODIFICATION DE LIGNE
@@ -1704,6 +1740,7 @@ class Api:
     def update_table_row(
         self, table_name: str, row_id: int, column: str, value: str, file_path: str = None
     ):
+        conn = None
         try:
             db_path = self._get_db_path(file_path)
             if not db_path:
@@ -1720,17 +1757,18 @@ class Api:
             conn.commit()
 
             if cursor.rowcount > 0:
-                conn.close()
                 return {"success": True, "message": "Valeur modifiee avec succes."}
             else:
-                conn.close()
                 return {"success": False, "message": "Aucune ligne modifiee."}
         except Exception as e:
             return {"success": False, "message": str(e)}
+        finally:
+            self._safe_close_connection(conn)
 
     def insert_table_row(
         self, table_name: str, values: Dict[str, str], file_path: str = None
     ):
+        conn = None
         try:
             db_path = self._get_db_path(file_path)
             if not db_path:
@@ -1755,16 +1793,18 @@ class Api:
             cursor.execute(query, vals)
             conn.commit()
             new_id = cursor.lastrowid
-            conn.close()
 
             return {"success": True, "message": "Ligne ajoutee avec succes.", "row_id": new_id}
         except Exception as e:
             return {"success": False, "message": str(e)}
+        finally:
+            self._safe_close_connection(conn)
 
     # ============================================================
     # STATISTIQUES
     # ============================================================
     def get_table_statistics(self, table_name: str, file_path: str = None):
+        conn = None
         try:
             db_path = self._get_db_path(file_path)
             if not db_path:
@@ -1812,12 +1852,14 @@ class Api:
                         "total_count": total if total is not None else 0,
                     }
 
-            conn.close()
             return {"success": True, "stats": stats, "columns": columns}
         except Exception as e:
             return {"success": False, "message": str(e), "stats": {}}
+        finally:
+            self._safe_close_connection(conn)
 
     def get_column_values(self, table_name: str, column: str, file_path: str = None):
+        conn = None
         try:
             db_path = self._get_db_path(file_path)
             if not db_path:
@@ -1830,13 +1872,15 @@ class Api:
                 f'SELECT "{column}" FROM "{table_name}" WHERE "{column}" IS NOT NULL AND "{column}" != ""'
             )
             values = [row[0] for row in cursor.fetchall()]
-            conn.close()
 
             return {"success": True, "values": values}
         except Exception as e:
             return {"success": False, "message": str(e), "values": []}
+        finally:
+            self._safe_close_connection(conn)
 
     def get_table_distribution(self, table_name: str, column: str, file_path: str = None):
+        conn = None
         try:
             db_path = self._get_db_path(file_path)
             if not db_path:
@@ -1857,11 +1901,12 @@ class Api:
             distribution = [
                 {"value": row[0], "count": row[1]} for row in cursor.fetchall()
             ]
-            conn.close()
 
             return {"success": True, "distribution": distribution}
         except Exception as e:
             return {"success": False, "message": str(e), "distribution": []}
+        finally:
+            self._safe_close_connection(conn)
 
     # ============================================================
     # DOUBLONS
@@ -1869,6 +1914,7 @@ class Api:
     def scan_table_duplicates_advanced(
         self, table_name: str, algorithm: str = "general", file_path: str = None
     ):
+        conn = None
         try:
             db_path = self._get_db_path(file_path)
             if not db_path:
@@ -1881,7 +1927,6 @@ class Api:
             cursor.execute(f'PRAGMA table_info("{table_name}")')
             columns = [col[1] for col in cursor.fetchall()]
             if not columns:
-                conn.close()
                 return {"success": True, "duplicates": []}
 
             if algorithm == "general":
@@ -1890,7 +1935,6 @@ class Api:
                     cols_to_check = columns
 
                 df = pd.read_sql_query(f'SELECT rowid, * FROM "{table_name}"', conn)
-                conn.close()
 
                 if df.empty:
                     return {"success": True, "duplicates": []}
@@ -1931,7 +1975,6 @@ class Api:
 
             elif algorithm == "cin_nom":
                 df = pd.read_sql_query(f'SELECT rowid, * FROM "{table_name}"', conn)
-                conn.close()
 
                 if df.empty:
                     return {"success": True, "duplicates": []}
@@ -2064,13 +2107,14 @@ class Api:
                 return {"success": True, "duplicates": duplicates, "algorithm": "cin_nom"}
 
             else:
-                conn.close()
                 return {"success": True, "duplicates": []}
 
         except Exception as e:
             import traceback
             traceback.print_exc()
             return {"success": False, "message": str(e), "duplicates": []}
+        finally:
+            self._safe_close_connection(conn)
 
     def _convert_row_to_dict(self, row, columns):
         result = {}
@@ -2090,6 +2134,7 @@ class Api:
         return result
 
     def delete_table_row(self, table_name: str, row_id: int, file_path: str = None):
+        conn = None
         try:
             db_path = self._get_db_path(file_path)
             if not db_path:
@@ -2099,12 +2144,14 @@ class Api:
             cursor = conn.cursor()
             cursor.execute(f'DELETE FROM "{table_name}" WHERE rowid = ?', (row_id,))
             conn.commit()
-            conn.close()
             return {"success": True, "message": f"Ligne {row_id} supprimee."}
         except Exception as e:
             return {"success": False, "message": str(e)}
+        finally:
+            self._safe_close_connection(conn)
 
     def clean_database_values(self, file_path: str = None):
+        conn = None
         try:
             db_path = self._get_db_path(file_path)
             if not db_path:
@@ -2130,10 +2177,11 @@ class Api:
                         df[col] = df[col].fillna("Non specifie")
                 df.to_sql(table, conn, if_exists="replace", index=False)
 
-            conn.close()
             return {"success": True, "message": "Nettoyage des valeurs NaN/Null termine."}
         except Exception as e:
             return {"success": False, "message": str(e)}
+        finally:
+            self._safe_close_connection(conn)
 
     # ============================================================
     # IMPORTATION EXCEL
@@ -2236,17 +2284,31 @@ class Api:
     def import_excel_to_database(
         self, file_path: str, sheet_name: str = None, table_name: str = None
     ):
+        """
+        Import renforce : ferme toute base ouverte avant, libere les ressources
+        apres l'ecriture, puis ouvre la nouvelle base sans conflit de thread.
+        """
         try:
             if not file_path or not str(file_path).strip():
                 return {"success": False, "message": "Le fichier Excel est requis."}
 
             excel_path = Path(file_path)
-            data_dir = BASE_DIR / "data"
+            data_dir = DATA_DIR
             data_dir.mkdir(parents=True, exist_ok=True)
 
             safe_db_name = self._clean_ascii(excel_path.stem) or "database"
             db_filename = f"{safe_db_name}.db"
             db_path = data_dir / db_filename
+
+            # ✅ Fermer toute base ouverte AVANT l'import
+            if self._active_db_path:
+                try:
+                    self._database_service.close_database()
+                except Exception:
+                    pass
+                self._active_db_path = None
+                self._last_db_path = None
+                self._release_resources(0.2)
 
             all_sheets = pd.read_excel(excel_path, sheet_name=None)
             conn = self._connect_db(str(db_path))
@@ -2254,58 +2316,63 @@ class Api:
             total_rows = 0
             log_path = data_dir / "logs.txt"
 
-            for current_sheet, df in all_sheets.items():
-                if sheet_name and str(current_sheet) != str(sheet_name):
-                    continue
+            try:
+                for current_sheet, df in all_sheets.items():
+                    if sheet_name and str(current_sheet) != str(sheet_name):
+                        continue
 
-                clean_table_name = (
-                    table_name
-                    if (table_name and len(all_sheets) == 1)
-                    else (self._clean_ascii(str(current_sheet)) or "table")
-                )
+                    clean_table_name = (
+                        table_name
+                        if (table_name and len(all_sheets) == 1)
+                        else (self._clean_ascii(str(current_sheet)) or "table")
+                    )
 
-                try:
-                    df = df.dropna(how="all")
+                    try:
+                        df = df.dropna(how="all")
 
-                    if any(str(col).lower().startswith("unnamed") for col in df.columns):
-                        if len(df) > 0:
-                            new_headers = (
-                                df.iloc[0].fillna("colonne_inconnue").astype(str).tolist()
-                            )
-                            cleaned_headers = []
-                            seen = {}
-                            for h in new_headers:
-                                h_clean = self._clean_ascii(h) or "col"
-                                if h_clean in seen:
-                                    seen[h_clean] += 1
-                                    h_clean = f"{h_clean}_{seen[h_clean]}"
-                                else:
-                                    seen[h_clean] = 0
-                                cleaned_headers.append(h_clean)
-                            df.columns = cleaned_headers
-                            df = df.drop(df.index[0])
+                        if any(str(col).lower().startswith("unnamed") for col in df.columns):
+                            if len(df) > 0:
+                                new_headers = (
+                                    df.iloc[0].fillna("colonne_inconnue").astype(str).tolist()
+                                )
+                                cleaned_headers = []
+                                seen = {}
+                                for h in new_headers:
+                                    h_clean = self._clean_ascii(h) or "col"
+                                    if h_clean in seen:
+                                        seen[h_clean] += 1
+                                        h_clean = f"{h_clean}_{seen[h_clean]}"
+                                    else:
+                                        seen[h_clean] = 0
+                                    cleaned_headers.append(h_clean)
+                                df.columns = cleaned_headers
+                                df = df.drop(df.index[0])
 
-                    for col in df.columns:
-                        if pd.api.types.is_numeric_dtype(df[col]):
-                            df[col] = df[col].fillna(0)
-                        elif pd.api.types.is_datetime64_any_dtype(df[col]):
-                            df[col] = pd.to_datetime(df[col]).dt.date
-                            df[col] = df[col].fillna(pd.Timestamp.now().date())
-                        else:
-                            df[col] = df[col].fillna("Non specifie")
+                        for col in df.columns:
+                            if pd.api.types.is_numeric_dtype(df[col]):
+                                df[col] = df[col].fillna(0)
+                            elif pd.api.types.is_datetime64_any_dtype(df[col]):
+                                df[col] = pd.to_datetime(df[col]).dt.date
+                                df[col] = df[col].fillna(pd.Timestamp.now().date())
+                            else:
+                                df[col] = df[col].fillna("Non specifie")
 
-                    df.columns = [self._clean_ascii(str(col)) or "col" for col in df.columns]
-                    df.to_sql(clean_table_name, conn, if_exists="replace", index=False)
-                    tables_created.append(clean_table_name)
-                    total_rows += len(df)
-                except Exception as sheet_err:
-                    err_msg = f"[ERREUR IMPORT] Feuille '{current_sheet}' : {str(sheet_err)}\n"
-                    with open(log_path, "a", encoding="utf-8") as log_file:
-                        log_file.write(err_msg)
-                    continue
+                        df.columns = [self._clean_ascii(str(col)) or "col" for col in df.columns]
+                        df.to_sql(clean_table_name, conn, if_exists="replace", index=False)
+                        tables_created.append(clean_table_name)
+                        total_rows += len(df)
+                    except Exception as sheet_err:
+                        err_msg = f"[ERREUR IMPORT] Feuille '{current_sheet}' : {str(sheet_err)}\n"
+                        with open(log_path, "a", encoding="utf-8") as log_file:
+                            log_file.write(err_msg)
+                        continue
+            finally:
+                self._safe_close_connection(conn)
 
-            conn.close()
-            self.open_database(str(db_path))
+            # ✅ Liberer les ressources avant d'ouvrir la nouvelle base
+            self._release_resources(0.35)
+
+            open_result = self.open_database(str(db_path))
 
             return {
                 "success": True,
@@ -2313,8 +2380,11 @@ class Api:
                 "tables": tables_created,
                 "total_rows": total_rows,
                 "db_path": str(db_path),
+                "open_result": open_result,
             }
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             return {"success": False, "message": f"Erreur lors de la conversion : {e}"}
 
     # ============================================================
@@ -2411,7 +2481,7 @@ class Api:
             }
 
     # ============================================================
-    # EXPORTATION EXCEL
+    # EXPORTATION EXCEL (fichier de sortie)
     # ============================================================
     def select_excel_export_file(self):
         global _APP_WINDOW
@@ -2495,6 +2565,7 @@ class Api:
         group_by: str = None,
         file_path: str = None,
     ):
+        conn = None
         try:
             db_path = self._get_db_path(file_path)
             if not db_path:
@@ -2559,7 +2630,6 @@ class Api:
                 query = f'SELECT * FROM "{safe_table}" LIMIT 1000'
 
             df = pd.read_sql_query(query, conn, params=params if params else None)
-            conn.close()
 
             for col in df.columns:
                 if pd.api.types.is_datetime64_any_dtype(df[col]):
@@ -2572,11 +2642,16 @@ class Api:
                 "message": f"Erreur SQL : {str(e)}",
                 "data": [],
             }
+        finally:
+            self._safe_close_connection(conn)
 
 
 def main():
     global _APP_WINDOW
+
+    # Initialiser system.db dans le dossier PERSISTANT
     initialize_database()
+
     api = Api()
 
     _APP_WINDOW = webview.create_window(

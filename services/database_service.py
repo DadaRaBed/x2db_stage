@@ -19,13 +19,13 @@ class DatabaseService:
             return {
                 "success": True,
                 "message": "Base SQLite créée avec succès.",
-                "database": database_info
+                "database": database_info,
             }
 
         except (OSError, ValueError, TypeError) as error:
             return {
                 "success": False,
-                "message": str(error)
+                "message": str(error),
             }
 
     def open_database(self, path: str) -> dict:
@@ -35,13 +35,13 @@ class DatabaseService:
             return {
                 "success": True,
                 "message": "Base SQLite ouverte avec succès.",
-                "database": database_info
+                "database": database_info,
             }
 
         except (OSError, ValueError, TypeError) as error:
             return {
                 "success": False,
-                "message": str(error)
+                "message": str(error),
             }
 
     def close_database(self) -> dict:
@@ -51,17 +51,25 @@ class DatabaseService:
             return {
                 "success": True,
                 "message": "Base SQLite fermée.",
-                "database": self.get_database_info()
+                "database": self.get_database_info(),
             }
 
         except (OSError, ValueError, TypeError) as error:
             return {
                 "success": False,
-                "message": str(error)
+                "message": str(error),
             }
 
     def get_database_info(self) -> dict:
-        return self.repository.get_database_info()
+        try:
+            return self.repository.get_database_info()
+        except Exception as error:
+            return {
+                "success": False,
+                "message": str(error),
+                "path": None,
+                "name": None,
+            }
 
     def get_excel_sheets(self, file_path: str) -> dict:
         """
@@ -72,26 +80,26 @@ class DatabaseService:
 
             return {
                 "success": True,
-                "sheets": sheets
+                "sheets": sheets,
             }
 
         except (
             OSError,
             ValueError,
             TypeError,
-            RuntimeError
+            RuntimeError,
         ) as error:
             return {
                 "success": False,
                 "message": str(error),
-                "sheets": []
+                "sheets": [],
             }
 
     def preview_excel_sheet(
         self,
         file_path: str,
         sheet_name: str,
-        max_rows: int = 100
+        max_rows: int = 100,
     ) -> dict:
         """
         Retourne un aperçu d'une feuille Excel sans importer ses données.
@@ -100,31 +108,31 @@ class DatabaseService:
             preview = self.excel_service.preview_sheet(
                 file_path=file_path,
                 sheet_name=sheet_name,
-                max_rows=max_rows
+                max_rows=max_rows,
             )
 
             return {
                 "success": True,
-                "preview": preview
+                "preview": preview,
             }
 
         except (
             OSError,
             ValueError,
             TypeError,
-            RuntimeError
+            RuntimeError,
         ) as error:
             return {
                 "success": False,
                 "message": str(error),
-                "preview": None
+                "preview": None,
             }
 
     def import_excel_to_database(
         self,
         file_path: str,
         sheet_name: str,
-        table_name: str
+        table_name: str,
     ) -> dict:
         """
         Importe une feuille Excel dans une table SQLite.
@@ -144,7 +152,7 @@ class DatabaseService:
 
             sheet_data = self.excel_service.read_sheet(
                 str(path),
-                str(sheet_name)
+                str(sheet_name),
             )
 
             headers = sheet_data.get("headers", [])
@@ -157,19 +165,19 @@ class DatabaseService:
 
             column_types = self.excel_service.infer_column_types(
                 headers=headers,
-                rows=rows
+                rows=rows,
             )
 
             prepared_rows = self.excel_service.prepare_rows(
                 rows=rows,
-                types=column_types
+                types=column_types,
             )
 
             schema = self.repository.import_table(
                 table_name=clean_table_name,
                 headers=headers,
                 column_types=column_types,
-                rows=prepared_rows
+                rows=prepared_rows,
             )
 
             return {
@@ -181,20 +189,20 @@ class DatabaseService:
                 "table": {
                     "name": clean_table_name,
                     "columns": schema,
-                    "row_count": len(prepared_rows)
+                    "row_count": len(prepared_rows),
                 },
-                "database": self.get_database_info()
+                "database": self.get_database_info(),
             }
 
         except (
             OSError,
             ValueError,
             TypeError,
-            RuntimeError
+            RuntimeError,
         ) as error:
             return {
                 "success": False,
-                "message": str(error)
+                "message": str(error),
             }
 
     def get_database_tables(self) -> dict:
@@ -206,18 +214,18 @@ class DatabaseService:
 
             return {
                 "success": True,
-                "tables": tables
+                "tables": tables,
             }
 
         except (
             OSError,
             ValueError,
-            TypeError
+            TypeError,
         ) as error:
             return {
                 "success": False,
                 "message": str(error),
-                "tables": []
+                "tables": [],
             }
 
     def verify_table(self, table_name: str) -> dict:
@@ -234,17 +242,17 @@ class DatabaseService:
             return {
                 "success": True,
                 "table": clean_table_name,
-                "verification": result
+                "verification": result,
             }
 
         except (
             OSError,
             ValueError,
-            TypeError
+            TypeError,
         ) as error:
             return {
                 "success": False,
-                "message": str(error)
+                "message": str(error),
             }
 
     @staticmethod
@@ -261,7 +269,7 @@ class DatabaseService:
             r"[^\wÀ-ÿ-]",
             "_",
             value,
-            flags=re.UNICODE
+            flags=re.UNICODE,
         )
         value = re.sub(r"_+", "_", value)
         value = value.strip("_")

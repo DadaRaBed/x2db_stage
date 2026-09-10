@@ -10,6 +10,50 @@ class UserDatabaseRepository:
         self.connection = None
         self.database_path = None
 
+    # ============================================================
+    # CONNEXION SQLITE COMPATIBLE MULTI-THREAD
+    # ============================================================
+    def _connect(self, database_path):
+        """
+        Ouvre une connexion SQLite compatible multi-thread.
+
+        check_same_thread=False est INDISPENSABLE car pywebview execute
+        les appels API dans un thread different du thread principal.
+
+        Sans cette option, SQLite leve l'erreur :
+        'SQLite objects created in a thread can only be used in that same thread'.
+        """
+        connection = sqlite3.connect(
+            str(database_path),
+            check_same_thread=False,
+            timeout=30.0,
+        )
+        connection.row_factory = sqlite3.Row
+
+        try:
+            connection.execute("PRAGMA journal_mode=WAL;")
+            connection.execute("PRAGMA synchronous=NORMAL;")
+        except Exception:
+            pass
+
+        return connection
+
+    def _safe_close_connection(self, connection):
+        """Ferme proprement une connexion SQLite avec checkpoint WAL."""
+        if connection is None:
+            return
+        try:
+            connection.execute("PRAGMA wal_checkpoint(TRUNCATE);")
+        except Exception:
+            pass
+        try:
+            connection.close()
+        except Exception:
+            pass
+
+    # ============================================================
+    # CREATION
+    # ============================================================
     def create_database(self, path):
         database_path = Path(path).expanduser().resolve()
 
@@ -20,13 +64,15 @@ class UserDatabaseRepository:
 
         database_path.parent.mkdir(parents=True, exist_ok=True)
 
-        connection = sqlite3.connect(database_path)
-        connection.row_factory = sqlite3.Row
+        connection = self._connect(database_path)
 
         self._replace_connection(connection, database_path)
 
         return self.get_database_info()
 
+    # ============================================================
+    # OUVERTURE
+    # ============================================================
     def open_database(self, path):
         database_path = Path(path).expanduser().resolve()
 
@@ -49,8 +95,7 @@ class UserDatabaseRepository:
         connection = None
 
         try:
-            connection = sqlite3.connect(database_path)
-            connection.row_factory = sqlite3.Row
+            connection = self._connect(database_path)
 
             result = connection.execute(
                 "PRAGMA quick_check"
@@ -63,14 +108,14 @@ class UserDatabaseRepository:
 
         except sqlite3.DatabaseError as error:
             if connection is not None:
-                connection.close()
+                self._safe_close_connection(connection)
 
             raise ValueError(
                 "Le fichier sélectionné n'est pas une base SQLite valide."
             ) from error
         except ValueError:
             if connection is not None:
-                connection.close()
+                self._safe_close_connection(connection)
 
             raise
 
@@ -78,39 +123,64 @@ class UserDatabaseRepository:
 
         return self.get_database_info()
 
+    # ============================================================
+    # FERMETURE
+    # ============================================================
     def close_database(self):
         if self.connection is not None:
-            self.connection.close()
+            self._safe_close_connection(self.connection)
 
         self.connection = None
         self.database_path = None
 
+    # ============================================================
+    # INFORMATIONS
+    # ============================================================
     def get_database_info(self):
         if self.connection is None or self.database_path is None:
             return {
                 "open": False,
                 "path": None,
                 "name": None,
-                "tables": []
+                "tables": [],
+                "success": False,
+                "message": "Aucune base ouverte.",
             }
 
-        tables = self.connection.execute(
-            """
-            SELECT name
-            FROM sqlite_master
-            WHERE type = 'table'
-              AND name NOT LIKE 'sqlite_%'
-            ORDER BY name
-            """
-        ).fetchall()
+        try:
+            tables = self.connection.execute(
+                """
+                SELECT name
+                FROM sqlite_master
+                WHERE type = 'table'
+                  AND name NOT LIKE 'sqlite_%'
+                ORDER BY name
+                """
+            ).fetchall()
 
-        return {
-            "open": True,
-            "path": str(self.database_path),
-            "name": self.database_path.name,
-            "tables": [table["name"] for table in tables]
-        }
+            return {
+                "open": True,
+                "path": str(self.database_path),
+                "name": self.database_path.name,
+                "tables": [table["name"] for table in tables],
+                "success": True,
+                "database_path": str(self.database_path),
+                "database_name": self.database_path.name,
+                "filename": self.database_path.name,
+            }
+        except sqlite3.Error as e:
+            return {
+                "open": False,
+                "path": str(self.database_path) if self.database_path else None,
+                "name": self.database_path.name if self.database_path else None,
+                "tables": [],
+                "success": False,
+                "message": str(e),
+            }
 
+    # ============================================================
+    # IMPORT DE TABLE
+    # ============================================================
     def import_table(self, table_name, headers, column_types, rows):
         """
         Crée une table et importe les lignes fournies dans une transaction.
@@ -234,6 +304,9 @@ class UserDatabaseRepository:
 
         return self.get_table_schema(normalized_table_name)
 
+    # ============================================================
+    # SCHEMAS
+    # ============================================================
     def get_table_schema(self, table_name):
         self._ensure_connection()
 
@@ -288,6 +361,40 @@ class UserDatabaseRepository:
             for table_name in table_names
         ]
 
+    # ============================================================
+    # VERIFICATION
+    # ============================================================
+    def verify_table(self, table_name):
+        """Verifie l'existence et le contenu d'une table."""
+        self._ensure_connection()
+
+        normalized_table_name = self._validate_identifier(
+            table_name,
+            "table"
+        )
+
+        table_exists = self.connection.execute(
+            """
+            SELECT 1
+            FROM sqlite_master
+            WHERE type = 'table'
+              AND name = ?
+            """,
+            (normalized_table_name,)
+        ).fetchone()
+
+        if table_exists is None:
+            return {"exists": False, "row_count": 0}
+
+        row_count = self.connection.execute(
+            f"SELECT COUNT(*) FROM {self._quote_identifier(normalized_table_name)}"
+        ).fetchone()[0]
+
+        return {"exists": True, "row_count": row_count}
+
+    # ============================================================
+    # METHODES INTERNES
+    # ============================================================
     def _replace_connection(self, connection, database_path):
         self.close_database()
 
