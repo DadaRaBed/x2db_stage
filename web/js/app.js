@@ -1,14 +1,17 @@
-// === CONSTANTES ET SÉLECTEURS ===
+// ============================================
+// CONSTANTES ET SELECTEURS
+// ============================================
 const setupView = document.querySelector("#setup-view");
 const loginView = document.querySelector("#login-view");
 const dashboardView = document.querySelector("#dashboard-view");
 const excelImportView = document.querySelector("#excel-import-view");
 const existingDbView = document.querySelector("#existing-db-view");
+const duplicatesView = document.querySelector("#duplicates-view");
 const manipulateView = document.querySelector("#manipulate-view");
+const createDbView = document.querySelector("#create-db-view");
 
 const setupForm = document.querySelector("#setup-form");
 const loginForm = document.querySelector("#login-form");
-const logoutButton = document.querySelector("#logout-button");
 const menuButton = document.querySelector("#menu-button");
 const userMenu = document.querySelector("#user-menu");
 
@@ -35,7 +38,9 @@ const importButton = document.querySelector(
   "#import-excel-into-database-button",
 );
 
-// === ÉTAT GLOBAL ===
+// ============================================
+// ETAT GLOBAL
+// ============================================
 let appInitialized = false;
 let apiReadyPromise = null;
 let selectedExcelFilePath = "";
@@ -44,8 +49,45 @@ let importInProgress = false;
 let duplicateScanCancelled = false;
 let currentLoggedInUser = null;
 let currentDbPath = null;
+let isDbOpen = false;
 
-// === UTILITAIRES ===
+let allDuplicates = [];
+let currentDuplicatesAlgo = "general";
+let selectedDuplicateTables = [];
+let currentColumns = [];
+
+let currentManipulateTable = "";
+let currentManipulateData = [];
+let currentManipulateFiltered = [];
+let manipulateShowResults = true;
+
+let createDbExcelPath = "";
+let createDbExcelSheets = [];
+let createDbSelectedSheet = "";
+
+// Attributs a filtrer
+const FILTER_ATTRIBUTES = [
+  "pole_de_developpement",
+  "podev",
+  "district",
+  "commune",
+  "fkt",
+  "localite",
+  "filieres",
+  "opr",
+  "h_f",
+  "filiation_menage",
+  "categorisation_eaf",
+  "variete",
+  "observation",
+];
+
+// Filtres actifs par valeur
+window._activeValueFilters = {};
+
+// ============================================
+// FONCTIONS GLOBALES
+// ============================================
 function escapeHtml(str) {
   if (str === null || str === undefined) return "";
   return String(str)
@@ -58,7 +100,7 @@ function escapeHtml(str) {
 
 function showView(viewElement) {
   const allViews = document.querySelectorAll(
-    "#setup-view, #login-view, #dashboard-view, #excel-import-view, #existing-db-view, #manipulate-view",
+    "#setup-view, #login-view, #dashboard-view, #excel-import-view, #existing-db-view, #duplicates-view, #manipulate-view, #create-db-view",
   );
   allViews.forEach((view) => {
     if (view) {
@@ -112,7 +154,7 @@ function showNotificationWithProgress(message, percentage, success = true) {
   notif.innerHTML = `
         <div style="font-weight: bold; margin-bottom: 4px;">${escapeHtml(message)}</div>
         <div style="display: flex; justify-content: space-between; font-size: 0.85rem; opacity: 0.9; margin-bottom: 4px;">
-            <span>Progress : ${Math.round(percentage)}%</span>
+            <span>Progression : ${Math.round(percentage)}%</span>
         </div>
         <div style="width: 100%; background: rgba(255,255,255,0.3); height: 6px; border-radius: 3px; overflow: hidden;">
             <div style="width: ${Math.min(100, percentage)}%; background: #ffffff; height: 100%; transition: width 0.2s ease;"></div>
@@ -124,6 +166,26 @@ function showNotificationWithProgress(message, percentage, success = true) {
       notif.style.display = "none";
       notif.remove();
     }, 2000);
+  }
+}
+
+function showGlobalProgress(percentage, show = true) {
+  const progressBar = document.getElementById("global-progress-bar");
+  const progressFill = document.getElementById("global-progress-fill");
+  if (!progressBar || !progressFill) return;
+
+  if (show) {
+    progressBar.style.display = "block";
+    progressFill.style.width = `${percentage}%`;
+    if (percentage >= 100) {
+      setTimeout(() => {
+        progressBar.style.display = "none";
+        progressFill.style.width = "0%";
+      }, 800);
+    }
+  } else {
+    progressBar.style.display = "none";
+    progressFill.style.width = "0%";
   }
 }
 
@@ -156,7 +218,7 @@ function waitForApi() {
       }
       attempts += 1;
       if (attempts >= 100) {
-        reject(new Error("API pywebview unavailable."));
+        reject(new Error("API pywebview indisponible."));
         return;
       }
       setTimeout(check, 100);
@@ -166,13 +228,31 @@ function waitForApi() {
   return apiReadyPromise;
 }
 
-// === GESTION DU THÈME ===
+function updateSelectAllButton() {
+  const checkboxes = document.querySelectorAll(".dup-checkbox");
+  const selectAllBtn = document.querySelector("#btn-select-all-dups");
+  if (!selectAllBtn || checkboxes.length === 0) return;
+
+  const checked = Array.from(checkboxes).filter((chk) => chk.checked).length;
+  const total = checkboxes.length;
+
+  if (checked === total) {
+    selectAllBtn.textContent = "Tout deselectionner";
+  } else if (checked === 0) {
+    selectAllBtn.textContent = "Tout selectionner";
+  } else {
+    selectAllBtn.textContent = `Tout selectionner (${checked}/${total})`;
+  }
+}
+
 function applyTheme(theme) {
   document.documentElement.setAttribute("data-theme", theme);
   localStorage.setItem("app_theme", theme);
 }
 
-// === SAUVEGARDE ET RESTAURATION DE LA BASE ===
+// ============================================
+// SAUVEGARDE ET RESTAURATION DE LA BASE
+// ============================================
 function saveCurrentDbState() {
   const selectEl = document.getElementById("db-file-select");
   if (selectEl && selectEl.value) {
@@ -208,7 +288,23 @@ function restoreDbState() {
   return false;
 }
 
-// === GESTION DE LA SESSION ===
+function updateTerminateButtonVisibility() {
+  const buttons = [
+    document.getElementById("btn-terminate-database-existing"),
+    document.getElementById("btn-terminate-database-duplicates"),
+    document.getElementById("btn-terminate-database-manipulate"),
+  ];
+
+  buttons.forEach((btn) => {
+    if (btn) {
+      btn.style.display = isDbOpen ? "inline-flex" : "none";
+    }
+  });
+}
+
+// ============================================
+// GESTION DE LA SESSION
+// ============================================
 function showDashboard(user) {
   if (!user) {
     showView(loginView);
@@ -228,7 +324,7 @@ function showDashboard(user) {
     "#menu-avatar, .menu-avatar-alt",
   );
 
-  if (greeting) greeting.textContent = `Hello, ${pseudo}`;
+  if (greeting) greeting.textContent = `Bonjour, ${pseudo}`;
   menuPseudos.forEach((el) => {
     if (el) el.textContent = pseudo;
   });
@@ -252,25 +348,356 @@ function goToDashboard() {
 
   setTimeout(() => {
     restoreDbState();
-    const resultsContainer = document.querySelector("#db-results-container");
-    if (resultsContainer && !resultsContainer.classList.contains("hidden")) {
-      // Keep results visible
-    }
   }, 100);
 }
 
 function goToExistingDb() {
   saveCurrentDbState();
-
   showView(existingDbView);
   loadDataDirectoryDatabases();
+  updateTerminateButtonVisibility();
 
   setTimeout(() => {
     restoreDbState();
   }, 200);
 }
 
-// === INITIALISATION ===
+function goToDuplicates() {
+  if (!isDbOpen) {
+    showNotification("Veuillez d'abord ouvrir une base de donnees.", false);
+    return;
+  }
+  saveCurrentDbState();
+  showView(duplicatesView);
+  updateTerminateButtonVisibility();
+  loadDuplicateTableFilter();
+  resetDuplicateView();
+}
+
+function resetDuplicateView() {
+  allDuplicates = [];
+  currentColumns = [];
+  selectedDuplicateTables = [];
+
+  const resultsContainer = document.getElementById("dup-results-container");
+  if (resultsContainer) resultsContainer.classList.add("hidden");
+
+  const resultsContent = document.getElementById("db-results-content");
+  if (resultsContent) resultsContent.innerHTML = "";
+
+  const countBadge = document.getElementById("dup-results-count");
+  if (countBadge) countBadge.textContent = "0";
+
+  const statusDiv = document.getElementById("dup-scan-status");
+  if (statusDiv)
+    statusDiv.textContent =
+      'Selectionnez un algorithme et cliquez sur "Lancer l\'analyse"';
+}
+
+// ============================================
+// SUPPRESSION DE BASE DE DONNEES
+// ============================================
+async function deleteSelectedDatabase() {
+  const selectEl = document.getElementById("db-file-select");
+  if (!selectEl || !selectEl.value) {
+    showNotification("Veuillez d'abord selectionner une base.", false);
+    return;
+  }
+
+  const dbPath = selectEl.value;
+  const fileName = selectEl.options[selectEl.selectedIndex]?.text || dbPath;
+
+  if (
+    !confirm(
+      `ATTENTION : Suppression definitive\n\n` +
+        `Voulez-vous vraiment supprimer la base :\n"${fileName}" ?\n\n` +
+        `Cette action est IRREVERSIBLE.\nToutes les tables et donnees seront perdues.`,
+    )
+  ) {
+    return;
+  }
+
+  try {
+    await waitForApi();
+
+    // Si la base est actuellement ouverte, la fermer d'abord cote client
+    const openedPath = sessionStorage.getItem("current_db_path");
+    if (openedPath && openedPath === dbPath && isDbOpen) {
+      try {
+        await window.pywebview.api.terminate_database();
+      } catch (e) {
+        console.warn("Erreur fermeture base avant suppression:", e);
+      }
+      isDbOpen = false;
+      currentDbPath = null;
+      sessionStorage.removeItem("current_db_path");
+      sessionStorage.removeItem("current_db_name");
+      updateTerminateButtonVisibility();
+
+      const actionsPanel = document.getElementById("db-actions-panel");
+      if (actionsPanel) actionsPanel.classList.add("hidden");
+
+      const tablesContainer = document.getElementById(
+        "database-tables-container-existing",
+      );
+      if (tablesContainer) {
+        tablesContainer.innerHTML = "";
+        tablesContainer.classList.add("hidden");
+      }
+    }
+
+    showGlobalProgress(30, true);
+
+    const result = await window.pywebview.api.delete_database(dbPath);
+
+    showGlobalProgress(100, true);
+
+    if (result && result.success) {
+      showNotification(result.message || "Base supprimee avec succes.", true);
+      logUserAction(`Suppression de la base : ${result.db_name || fileName}`);
+
+      // Rafraichir la liste et vider le select
+      selectEl.value = "";
+      const label = document.getElementById("selected-db-path-label");
+      if (label) {
+        label.textContent = "Aucune base selectionnee";
+        label.style.color = "var(--text-color, gray)";
+        label.style.fontStyle = "italic";
+        label.style.fontWeight = "normal";
+      }
+      await loadDataDirectoryDatabases();
+    } else {
+      showNotification(
+        result?.message || "Erreur lors de la suppression.",
+        false,
+      );
+    }
+  } catch (err) {
+    console.error("Erreur suppression base:", err);
+    showNotification("Erreur lors de la suppression de la base.", false);
+  }
+}
+
+// ============================================
+// SUPPRESSION DE TABLE
+// ============================================
+async function deleteSelectedTable(tableName) {
+  if (!tableName) {
+    showNotification("Aucune table a supprimer.", false);
+    return;
+  }
+
+  if (
+    !confirm(
+      `ATTENTION : Suppression definitive\n\n` +
+        `Voulez-vous vraiment supprimer la table :\n"${tableName}" ?\n\n` +
+        `Toutes les donnees de cette table seront perdues.\nCette action est IRREVERSIBLE.`,
+    )
+  ) {
+    return;
+  }
+
+  try {
+    await waitForApi();
+    const activeDbPath = sessionStorage.getItem("current_db_path");
+
+    showGlobalProgress(30, true);
+
+    const result = await window.pywebview.api.delete_table(
+      tableName,
+      activeDbPath,
+    );
+
+    showGlobalProgress(100, true);
+
+    if (result && result.success) {
+      showNotification(
+        result.message || `Table "${tableName}" supprimee.`,
+        true,
+      );
+      logUserAction(`Suppression de la table : ${tableName}`);
+
+      // Si la table supprimee est celle actuellement ouverte dans manipulation,
+      // reinitialiser la vue
+      if (currentManipulateTable === tableName) {
+        currentManipulateTable = "";
+        currentManipulateData = [];
+        currentManipulateFiltered = [];
+        const container = document.querySelector(
+          "#manipulate-results-table-container",
+        );
+        if (container) {
+          container.innerHTML =
+            "<p style='color: gray'>Veuillez selectionner une table pour afficher les donnees.</p>";
+        }
+        await loadManipulateTables();
+      }
+
+      // Rafraichir la structure si affichee
+      const toggleChecked = document.getElementById(
+        "toggle-show-tables-list",
+      )?.checked;
+      if (toggleChecked && activeDbPath) {
+        await loadDatabaseDetails(activeDbPath);
+      }
+
+      // Rafraichir le filtre de tables pour les doublons
+      await loadDuplicateTableFilter();
+    } else {
+      showNotification(
+        result?.message || "Erreur lors de la suppression de la table.",
+        false,
+      );
+    }
+  } catch (err) {
+    console.error("Erreur suppression table:", err);
+    showNotification("Erreur lors de la suppression de la table.", false);
+  }
+}
+
+// ============================================
+// TERMINER LA BASE DE DONNEES
+// ============================================
+async function terminateDatabase() {
+  if (!isDbOpen) {
+    showNotification("Aucune base de donnees n'est ouverte.", false);
+    return;
+  }
+
+  if (
+    !confirm(
+      "Voulez-vous vraiment terminer l'utilisation de cette base de donnees ?\n\nVous pourrez en ouvrir une autre apres.",
+    )
+  ) {
+    return;
+  }
+
+  try {
+    await waitForApi();
+    const result = await window.pywebview.api.terminate_database();
+
+    if (result && result.success) {
+      isDbOpen = false;
+      currentDbPath = null;
+
+      const label = document.getElementById("selected-db-path-label");
+      if (label) {
+        label.textContent = "Aucune base selectionnee";
+        label.style.color = "var(--text-color, gray)";
+        label.style.fontWeight = "normal";
+      }
+
+      const selectEl = document.getElementById("db-file-select");
+      if (selectEl) selectEl.value = "";
+
+      const actionsPanel = document.getElementById("db-actions-panel");
+      if (actionsPanel) actionsPanel.classList.add("hidden");
+
+      updateTerminateButtonVisibility();
+
+      const tablesContainer = document.getElementById(
+        "database-tables-container-existing",
+      );
+      if (tablesContainer) {
+        tablesContainer.innerHTML = "";
+        tablesContainer.classList.add("hidden");
+      }
+
+      const resultsContainer = document.getElementById("dup-results-container");
+      if (resultsContainer) resultsContainer.classList.add("hidden");
+
+      allDuplicates = [];
+      currentColumns = [];
+      selectedDuplicateTables = [];
+      window._activeValueFilters = {};
+
+      showNotification(result.message || "Base de donnees terminee.", true);
+      logUserAction(`Terminer la base : ${result.closed_db || "inconnue"}`);
+    } else {
+      showNotification(
+        result?.message || "Erreur lors de la fermeture.",
+        false,
+      );
+    }
+  } catch (err) {
+    console.error("Erreur lors de la fermeture de la base:", err);
+    showNotification("Erreur lors de la fermeture de la base.", false);
+  }
+}
+
+// ============================================
+// DECONNEXION
+// ============================================
+async function logoutUser() {
+  try {
+    await waitForApi();
+    const result = await window.pywebview.api.logout();
+
+    if (result && result.success) {
+      sessionStorage.removeItem("session_active");
+      sessionStorage.removeItem("current_db_path");
+      sessionStorage.removeItem("current_db_name");
+      currentLoggedInUser = null;
+      window.lastLoggedInUser = null;
+      isDbOpen = false;
+
+      document.querySelectorAll(".user-menu").forEach((menu) => {
+        menu.classList.add("hidden");
+      });
+      document.querySelectorAll(".menu-button").forEach((btn) => {
+        btn.setAttribute("aria-expanded", "false");
+      });
+
+      updateTerminateButtonVisibility();
+
+      showView(loginView);
+      showNotification("Deconnexion reussie.", true);
+    } else {
+      const errorType = result?.error_type;
+
+      if (errorType === "database_still_open") {
+        showNotification(
+          "Une base de donnees est encore ouverte. Cliquez sur le bouton 'Terminer' pour la fermer avant de vous deconnecter.",
+          false,
+        );
+
+        setTimeout(() => {
+          alert(
+            "Impossible de se deconnecter\n\n" +
+              "Une base de donnees est encore ouverte.\n\n" +
+              "Veuillez cliquer sur le bouton orange 'Terminer la base' " +
+              "pour fermer la base de donnees avant de vous deconnecter.",
+          );
+        }, 100);
+      } else if (errorType === "operation_in_progress") {
+        showNotification(
+          "Une operation est en cours. Veuillez patienter avant de vous deconnecter.",
+          false,
+        );
+
+        setTimeout(() => {
+          alert(
+            "Impossible de se deconnecter\n\n" +
+              "Une operation est actuellement en cours sur la base de donnees.\n\n" +
+              "Veuillez attendre la fin de l'operation avant de vous deconnecter.",
+          );
+        }, 100);
+      } else {
+        showNotification(
+          result?.message || "Erreur lors de la deconnexion.",
+          false,
+        );
+      }
+    }
+  } catch (error) {
+    console.error("Erreur lors de la deconnexion:", error);
+    showNotification("Erreur lors de la deconnexion.", false);
+  }
+}
+
+// ============================================
+// INITIALISATION
+// ============================================
 async function initializeApp() {
   if (appInitialized) return;
   try {
@@ -287,7 +714,7 @@ async function initializeApp() {
       if (status.authenticated) {
         showDashboard(status.user);
       } else {
-        showDashboard({ pseudo: "User" });
+        showDashboard({ pseudo: "Utilisateur" });
       }
     }
   } catch (error) {
@@ -295,12 +722,14 @@ async function initializeApp() {
     showView(loginView);
     showMessage(
       "#login-message",
-      "Unable to communicate with the application.",
+      "Impossible de communiquer avec l'application.",
     );
   }
 }
 
-// === IMPORTATION EXCEL ===
+// ============================================
+// IMPORTATION EXCEL
+// ============================================
 function updateImportButtonState() {
   const tableName = excelTableNameInput?.value.trim() || "";
   const valid = Boolean(
@@ -316,10 +745,11 @@ function resetExcelImportView() {
   selectedExcelSheetName = "";
   importInProgress = false;
   if (selectedExcelFileElement)
-    selectedExcelFileElement.textContent = "No file selected";
+    selectedExcelFileElement.textContent = "Aucun fichier selectionne";
   if (excelSheetContainer) excelSheetContainer.classList.add("hidden");
   if (excelSheetSelect) {
-    excelSheetSelect.innerHTML = '<option value="">Select a sheet</option>';
+    excelSheetSelect.innerHTML =
+      '<option value="">Selectionnez une feuille</option>';
     excelSheetSelect.disabled = true;
   }
   excelPreviewContainer?.classList.add("hidden");
@@ -336,10 +766,10 @@ async function selectExcelFile() {
     await waitForApi();
     const result = await window.pywebview.api.select_excel_file();
     if (!result?.success) {
-      if (result?.message !== "No file selected.") {
+      if (result?.message !== "Aucun fichier selectionne.") {
         showMessage(
           "#excel-import-message",
-          result?.message || "Unable to select file.",
+          result?.message || "Impossible de selectionner le fichier.",
         );
       }
       return;
@@ -363,7 +793,10 @@ async function selectExcelFile() {
     updateImportButtonState();
   } catch (error) {
     console.error(error);
-    showMessage("#excel-import-message", "Unable to select Excel file.");
+    showMessage(
+      "#excel-import-message",
+      "Impossible de selectionner le fichier Excel.",
+    );
   }
 }
 
@@ -374,12 +807,12 @@ async function loadExcelSheets() {
   if (!result?.success || !Array.isArray(result.sheets)) {
     showMessage(
       "#excel-import-message",
-      result?.message || "Unable to read Excel sheets.",
+      result?.message || "Impossible de lire les feuilles Excel.",
     );
     return;
   }
   excelSheetSelect.innerHTML =
-    '<option value="">Select a sheet (optional)</option>';
+    '<option value="">Selectionnez une feuille (optionnel)</option>';
   result.sheets.forEach((sheet) => {
     const option = document.createElement("option");
     option.value = sheet;
@@ -410,7 +843,7 @@ async function loadExcelPreview(sheetName) {
     if (!result?.success) {
       showMessage(
         "#excel-import-message",
-        result?.message || "Unable to generate preview.",
+        result?.message || "Impossible de generer l'apercu.",
       );
       return;
     }
@@ -423,7 +856,10 @@ async function loadExcelPreview(sheetName) {
     updateImportButtonState();
   } catch (error) {
     console.error(error);
-    showMessage("#excel-import-message", "Unable to read selected sheet.");
+    showMessage(
+      "#excel-import-message",
+      "Impossible de lire la feuille selectionnee.",
+    );
   }
 }
 
@@ -440,7 +876,7 @@ function renderExcelPreview(headers) {
     headersArray = Object.values(headersArray);
   }
   if (!Array.isArray(headersArray) || headersArray.length === 0) {
-    excelPreviewCount.textContent = "No columns detected";
+    excelPreviewCount.textContent = "Aucune colonne detectee";
     excelImportActions.classList.add("hidden");
     updateImportButtonState();
     return;
@@ -456,7 +892,7 @@ function renderExcelPreview(headers) {
     const badge = document.createElement("span");
     badge.className = "column-badge";
     badge.textContent = String(
-      header !== null && header !== undefined ? header : "Unnamed column",
+      header !== null && header !== undefined ? header : "Colonne sans nom",
     );
     badge.style.background = "var(--bg-secondary, #e0e7ff)";
     badge.style.color = "var(--text-color, #3730a3)";
@@ -467,19 +903,22 @@ function renderExcelPreview(headers) {
     listContainer.appendChild(badge);
   });
   excelPreview.appendChild(listContainer);
-  excelPreviewCount.textContent = `${headersArray.length} column(s) identified`;
+  excelPreviewCount.textContent = `${headersArray.length} colonne(s) identifiee(s)`;
   excelImportActions.classList.remove("hidden");
   updateImportButtonState();
 }
 
 async function importExcelIntoDatabase() {
   if (!selectedExcelFilePath) {
-    showMessage("#excel-import-message", "Please select an Excel file.");
+    showMessage(
+      "#excel-import-message",
+      "Veuillez selectionner un fichier Excel.",
+    );
     return;
   }
   const tableName = excelTableNameInput.value.trim();
   if (!tableName) {
-    showMessage("#excel-import-message", "Please enter a table name.");
+    showMessage("#excel-import-message", "Veuillez entrer un nom de table.");
     excelTableNameInput.focus();
     return;
   }
@@ -491,18 +930,20 @@ async function importExcelIntoDatabase() {
 
   let progress = 5;
   showNotificationWithProgress(
-    "Import and SQLite conversion in progress...",
+    "Import et conversion SQLite en cours...",
     progress,
     true,
   );
+  showGlobalProgress(progress, true);
 
   const progressInterval = setInterval(() => {
     progress = Math.min(95, progress + (95 - progress) * 0.1);
     showNotificationWithProgress(
-      "Import and SQLite conversion in progress...",
+      "Import et conversion SQLite en cours...",
       progress,
       true,
     );
+    showGlobalProgress(progress, true);
   }, 500);
 
   try {
@@ -512,19 +953,19 @@ async function importExcelIntoDatabase() {
       tableName,
     );
     clearInterval(progressInterval);
-    showNotificationWithProgress(
-      "Conversion completed successfully !",
-      100,
-      true,
-    );
+    showNotificationWithProgress("Conversion terminee avec succes.", 100, true);
+    showGlobalProgress(100, true);
 
     if (!result?.success) {
-      showMessage("#excel-import-message", result?.message || "Import failed.");
+      showMessage(
+        "#excel-import-message",
+        result?.message || "Echec de l'import.",
+      );
       return;
     }
     showMessage(
       "#excel-import-message",
-      result.message || "File converted successfully.",
+      result.message || "Fichier converti avec succes.",
       true,
     );
     excelImportActions?.classList.add("hidden");
@@ -542,7 +983,10 @@ async function importExcelIntoDatabase() {
   } catch (error) {
     clearInterval(progressInterval);
     console.error(error);
-    showMessage("#excel-import-message", "Unable to perform conversion.");
+    showMessage(
+      "#excel-import-message",
+      "Impossible d'effectuer la conversion.",
+    );
   } finally {
     importInProgress = false;
     if (selectExcelFileButton) selectExcelFileButton.disabled = false;
@@ -552,7 +996,252 @@ async function importExcelIntoDatabase() {
   }
 }
 
-// === AFFICHAGE DES BASES DE DONNÉES ===
+// ============================================
+// CREATION DE BASE DE DONNEES
+// ============================================
+function resetCreateDbView() {
+  createDbExcelPath = "";
+  createDbExcelSheets = [];
+  createDbSelectedSheet = "";
+
+  const fileLabel = document.getElementById("create-db-selected-file");
+  if (fileLabel) fileLabel.textContent = "Aucun fichier selectionne";
+
+  const dbNameInput = document.getElementById("create-db-name");
+  if (dbNameInput) dbNameInput.value = "";
+
+  const tableNameInput = document.getElementById("create-db-table-name");
+  if (tableNameInput) tableNameInput.value = "donnees";
+
+  const sheetContainer = document.getElementById("create-db-sheet-container");
+  if (sheetContainer) sheetContainer.classList.add("hidden");
+
+  const sheetSelect = document.getElementById("create-db-sheet-select");
+  if (sheetSelect) {
+    sheetSelect.innerHTML =
+      '<option value="">Selectionnez une feuille</option>';
+  }
+
+  const messageEl = document.getElementById("create-db-message");
+  if (messageEl) messageEl.textContent = "";
+
+  const exportSection = document.getElementById("create-db-export-section");
+  if (exportSection) exportSection.classList.add("hidden");
+}
+
+async function selectCreateDbExcelFile() {
+  try {
+    await waitForApi();
+    const result = await window.pywebview.api.select_excel_file();
+    if (!result?.success) {
+      if (result?.message !== "Aucun fichier selectionne.") {
+        showMessage(
+          "#create-db-message",
+          result?.message || "Impossible de selectionner le fichier.",
+        );
+      }
+      return;
+    }
+
+    createDbExcelPath = result.file_path;
+    const fileLabel = document.getElementById("create-db-selected-file");
+    if (fileLabel) fileLabel.textContent = createDbExcelPath;
+
+    const fileName = createDbExcelPath
+      .split("/")
+      .pop()
+      .split("\\")
+      .pop()
+      .split(".")[0];
+    const dbNameInput = document.getElementById("create-db-name");
+    if (dbNameInput && !dbNameInput.value) {
+      dbNameInput.value = fileName.toLowerCase().replace(/[^a-z0-9]/g, "_");
+    }
+
+    const sheetsResult =
+      await window.pywebview.api.get_excel_sheets(createDbExcelPath);
+    if (sheetsResult?.success && Array.isArray(sheetsResult.sheets)) {
+      createDbExcelSheets = sheetsResult.sheets;
+      const sheetContainer = document.getElementById(
+        "create-db-sheet-container",
+      );
+      const sheetSelect = document.getElementById("create-db-sheet-select");
+
+      if (sheetSelect) {
+        sheetSelect.innerHTML =
+          '<option value="">-- Toutes les feuilles --</option>';
+        sheetsResult.sheets.forEach((sheet) => {
+          const option = document.createElement("option");
+          option.value = sheet;
+          option.textContent = sheet;
+          sheetSelect.appendChild(option);
+        });
+      }
+      if (sheetContainer) sheetContainer.classList.remove("hidden");
+    }
+
+    showMessage("#create-db-message", "Fichier selectionne avec succes.", true);
+  } catch (error) {
+    console.error(error);
+    showMessage(
+      "#create-db-message",
+      "Impossible de selectionner le fichier Excel.",
+    );
+  }
+}
+
+async function createDatabaseFromExcel() {
+  if (!createDbExcelPath) {
+    showMessage(
+      "#create-db-message",
+      "Veuillez selectionner un fichier Excel.",
+    );
+    return;
+  }
+
+  const dbNameInput = document.getElementById("create-db-name");
+  const dbName = dbNameInput?.value.trim();
+
+  if (!dbName) {
+    showMessage("#create-db-message", "Veuillez entrer un nom de base.");
+    dbNameInput?.focus();
+    return;
+  }
+
+  showGlobalProgress(20, true);
+
+  try {
+    await waitForApi();
+    const result = await window.pywebview.api.create_database_from_excel(
+      createDbExcelPath,
+      dbName,
+    );
+
+    showGlobalProgress(80, true);
+
+    if (result?.success) {
+      showGlobalProgress(100, true);
+      showMessage(
+        "#create-db-message",
+        result.message || "Base de donnees creee avec succes.",
+        true,
+      );
+
+      const exportSection = document.getElementById("create-db-export-section");
+      if (exportSection) exportSection.classList.remove("hidden");
+
+      window._createdDbPath = result.db_path;
+
+      showNotification("Base de donnees creee avec succes.", true);
+      logUserAction(`Creation de la base : ${result.db_name}`);
+
+      loadDataDirectoryDatabases();
+    } else {
+      showGlobalProgress(0, false);
+      showMessage(
+        "#create-db-message",
+        result?.message || "Erreur lors de la creation.",
+      );
+    }
+  } catch (error) {
+    showGlobalProgress(0, false);
+    console.error(error);
+    showMessage("#create-db-message", "Erreur lors de la creation.");
+  }
+}
+
+async function createEmptyDatabase() {
+  const dbNameInput = document.getElementById("create-db-name");
+  const tableNameInput = document.getElementById("create-db-table-name");
+
+  const dbName = dbNameInput?.value.trim();
+  const tableName = tableNameInput?.value.trim() || "donnees";
+
+  if (!dbName) {
+    showMessage("#create-db-message", "Veuillez entrer un nom de base.");
+    dbNameInput?.focus();
+    return;
+  }
+
+  showGlobalProgress(30, true);
+
+  try {
+    await waitForApi();
+    const result = await window.pywebview.api.create_new_database(
+      dbName,
+      tableName,
+    );
+
+    showGlobalProgress(100, true);
+
+    if (result?.success) {
+      showMessage(
+        "#create-db-message",
+        result.message || "Base de donnees creee avec succes.",
+        true,
+      );
+
+      const exportSection = document.getElementById("create-db-export-section");
+      if (exportSection) exportSection.classList.remove("hidden");
+
+      window._createdDbPath = result.db_path;
+
+      showNotification("Base de donnees creee avec succes.", true);
+      logUserAction(`Creation de la base vide : ${result.db_name}`);
+
+      loadDataDirectoryDatabases();
+    } else {
+      showGlobalProgress(0, false);
+      showMessage(
+        "#create-db-message",
+        result?.message || "Erreur lors de la creation.",
+      );
+    }
+  } catch (error) {
+    showGlobalProgress(0, false);
+    console.error(error);
+    showMessage("#create-db-message", "Erreur lors de la creation.");
+  }
+}
+
+async function exportCreatedDatabaseToExcel() {
+  if (!window._createdDbPath) {
+    showNotification("Aucune base a exporter.", false);
+    return;
+  }
+
+  try {
+    await waitForApi();
+    const saveResult = await window.pywebview.api.select_excel_save_file();
+    if (!saveResult || !saveResult.success) {
+      return;
+    }
+
+    showGlobalProgress(30, true);
+
+    const result =
+      await window.pywebview.api.export_database_to_excel_from_path(
+        window._createdDbPath,
+        saveResult.file_path,
+      );
+
+    showGlobalProgress(100, true);
+
+    if (result?.success) {
+      showNotification(`Excel exporte : ${saveResult.file_path}`, true);
+      logUserAction(`Export de la base creee vers Excel`);
+    } else {
+      showNotification(result?.message || "Erreur lors de l'export.", false);
+    }
+  } catch (error) {
+    console.error(error);
+    showNotification("Erreur lors de l'export Excel.", false);
+  }
+}
+
+// ============================================
+// AFFICHAGE DES BASES DE DONNEES
+// ============================================
 async function refreshDatabaseStatus() {
   try {
     await waitForApi();
@@ -565,8 +1254,8 @@ async function refreshDatabaseStatus() {
     const path = document.querySelector("#current-database-path");
     if (name)
       name.textContent =
-        info.name || info.database_name || info.filename || "SQLite Database";
-    if (path) path.textContent = info.path || info.database_path || "—";
+        info.name || info.database_name || info.filename || "Base SQLite";
+    if (path) path.textContent = info.path || info.database_path || "-";
 
     const structRes =
       await window.pywebview.api.get_database_structure_matrix();
@@ -577,7 +1266,7 @@ async function refreshDatabaseStatus() {
       );
     }
   } catch (error) {
-    console.error("Error during refresh:", error);
+    console.error("Erreur lors du rafraichissement:", error);
   }
 }
 
@@ -586,7 +1275,7 @@ function renderDatabaseStructureMatrix(structure, containerElement) {
   containerElement.replaceChildren();
   const tables = Object.keys(structure);
   if (tables.length === 0) {
-    containerElement.textContent = "No tables in this database.";
+    containerElement.textContent = "Aucune table dans cette base de donnees.";
     return;
   }
 
@@ -603,26 +1292,47 @@ function renderDatabaseStructureMatrix(structure, containerElement) {
     tableGroupEl.style.flexDirection = "column";
     tableGroupEl.style.gap = "0.5rem";
 
+    // Conteneur de ligne : bouton table + bouton supprimer
+    const headerRow = document.createElement("div");
+    headerRow.style.display = "flex";
+    headerRow.style.gap = "0.5rem";
+    headerRow.style.alignItems = "stretch";
+
     const tableButton = document.createElement("button");
     tableButton.type = "button";
     tableButton.className = "button button-primary";
     tableButton.style.display = "flex";
     tableButton.style.justifyContent = "space-between";
     tableButton.style.alignItems = "center";
-    tableButton.style.width = "100%";
+    tableButton.style.flex = "1";
     tableButton.style.padding = "0.75rem 1rem";
     tableButton.style.textAlign = "left";
     tableButton.style.borderRadius = "6px";
     tableButton.style.cursor = "pointer";
 
     const titleSpan = document.createElement("span");
-    titleSpan.innerHTML = `<i class="fas fa-table" style="margin-right: 8px;"></i> ${escapeHtml(tableName)} <small style="opacity: 0.8; font-weight: normal;">(${columns.length} attributes)</small>`;
+    titleSpan.innerHTML = `<i class="fas fa-table" style="margin-right: 8px;"></i> ${escapeHtml(tableName)} <small style="opacity: 0.8; font-weight: normal;">(${columns.length} attributs)</small>`;
 
     const arrowSpan = document.createElement("i");
     arrowSpan.className = "fas fa-chevron-down";
 
     tableButton.appendChild(titleSpan);
     tableButton.appendChild(arrowSpan);
+
+    // ✅ Bouton supprimer la table
+    const deleteBtn = document.createElement("button");
+    deleteBtn.type = "button";
+    deleteBtn.className = "btn-delete-table";
+    deleteBtn.title = `Supprimer la table "${tableName}"`;
+    deleteBtn.innerHTML = '<i class="fas fa-trash-alt"></i> Supprimer';
+    deleteBtn.style.padding = "0 14px";
+    deleteBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      deleteSelectedTable(tableName);
+    });
+
+    headerRow.appendChild(tableButton);
+    headerRow.appendChild(deleteBtn);
 
     const attrsContainer = document.createElement("div");
     attrsContainer.style.display = "none";
@@ -635,7 +1345,7 @@ function renderDatabaseStructureMatrix(structure, containerElement) {
 
     if (columns.length === 0) {
       const emptySpan = document.createElement("small");
-      emptySpan.textContent = "No attributes";
+      emptySpan.textContent = "Aucun attribut";
       emptySpan.style.color = "var(--text-color, gray)";
       attrsContainer.appendChild(emptySpan);
     } else {
@@ -660,7 +1370,7 @@ function renderDatabaseStructureMatrix(structure, containerElement) {
         : "fas fa-chevron-down";
     });
 
-    tableGroupEl.appendChild(tableButton);
+    tableGroupEl.appendChild(headerRow);
     tableGroupEl.appendChild(attrsContainer);
     listWrapper.appendChild(tableGroupEl);
   });
@@ -676,7 +1386,7 @@ async function loadDatabaseDetails(filePath) {
   if (!container) return;
 
   container.classList.remove("hidden");
-  container.innerHTML = "<p>Loading table structure...</p>";
+  container.innerHTML = "<p>Chargement de la structure des tables...</p>";
 
   try {
     await waitForApi();
@@ -685,17 +1395,18 @@ async function loadDatabaseDetails(filePath) {
     if (structRes && structRes.success === true && structRes.structure) {
       const tables = Object.keys(structRes.structure);
       if (tables.length === 0) {
-        container.innerHTML = "<p>The database contains no user tables.</p>";
+        container.innerHTML =
+          "<p>La base de donnees ne contient aucune table utilisateur.</p>";
       } else {
         renderDatabaseStructureMatrix(structRes.structure, container);
       }
       if (actionsPanel) actionsPanel.classList.remove("hidden");
     } else {
-      container.innerHTML = `<p style="color: red;">${escapeHtml(structRes?.message || "Loading error.")}</p>`;
+      container.innerHTML = `<p style="color: red;">${escapeHtml(structRes?.message || "Erreur de chargement.")}</p>`;
     }
   } catch (error) {
-    console.error("Error loading database:", error);
-    container.innerHTML = `<p style="color: red;">Error : ${escapeHtml(error.message)}</p>`;
+    console.error("Erreur lors du chargement de la base:", error);
+    container.innerHTML = `<p style="color: red;">Erreur : ${escapeHtml(error.message)}</p>`;
   }
 }
 
@@ -709,11 +1420,11 @@ async function loadDataDirectoryDatabases() {
     const res = await window.pywebview.api.get_data_directory_databases();
     if (res && res.success && res.databases.length > 0) {
       selectEl.innerHTML =
-        '<option value="">-- Select an existing database --</option>';
+        '<option value="">-- Selectionnez une base existante --</option>';
       res.databases.forEach((db) => {
         const opt = document.createElement("option");
         opt.value = db.path;
-        opt.textContent = `${db.name} (${db.size_kb} KB)`;
+        opt.textContent = `${db.name} (${db.size_kb} Ko)`;
         selectEl.appendChild(opt);
       });
       if (container) container.classList.remove("hidden");
@@ -721,11 +1432,136 @@ async function loadDataDirectoryDatabases() {
       if (container) container.classList.add("hidden");
     }
   } catch (e) {
-    console.error("Error listing databases from data folder:", e);
+    console.error("Erreur lors de la liste des bases depuis data:", e);
   }
 }
 
-// === ACTIVITÉS UTILISATEUR ===
+// ============================================
+// OUVRIR UNE BASE
+// ============================================
+async function openSelectedDatabase() {
+  const selectEl = document.getElementById("db-file-select");
+  const filePath = selectEl?.value;
+
+  if (!filePath) {
+    showNotification("Veuillez selectionner une base de donnees.", false);
+    return;
+  }
+
+  try {
+    await waitForApi();
+    const result = await window.pywebview.api.open_database_path(filePath);
+
+    if (result && result.success) {
+      isDbOpen = true;
+      const fileName = filePath.split("/").pop().split("\\").pop();
+      const label = document.getElementById("selected-db-path-label");
+      if (label) {
+        label.textContent = `${fileName} (ouverte)`;
+        label.style.color = "var(--success-color, #27ae60)";
+        label.style.fontWeight = "600";
+      }
+
+      const actionsPanel = document.getElementById("db-actions-panel");
+      if (actionsPanel) actionsPanel.classList.remove("hidden");
+
+      updateTerminateButtonVisibility();
+
+      const toggleChecked = document.getElementById(
+        "toggle-show-tables-list",
+      )?.checked;
+      if (toggleChecked) {
+        await loadDatabaseDetails(filePath);
+      }
+
+      showNotification(
+        `Base de donnees "${fileName}" ouverte avec succes.`,
+        true,
+      );
+      logUserAction(`Ouverture de la base : ${fileName}`);
+    } else {
+      showNotification(
+        result?.message || "Erreur lors de l'ouverture de la base.",
+        false,
+      );
+    }
+  } catch (err) {
+    console.error("Erreur lors de l'ouverture de la base:", err);
+    showNotification("Erreur lors de l'ouverture de la base.", false);
+  }
+}
+
+// ============================================
+// CREATION DES LISTES MERES
+// ============================================
+async function createMasterList() {
+  if (!isDbOpen) {
+    showNotification("Veuillez d'abord ouvrir une base de donnees.", false);
+    return;
+  }
+
+  if (
+    !confirm(
+      "Voulez-vous creer la liste mere ?\n\n" +
+        "Cette operation va :\n" +
+        "- Scanner toutes les tables de la base\n" +
+        "- Extraire toutes les personnes distinctes (sans doublons)\n" +
+        "- Ignorer les lignes sans nom et prenoms\n" +
+        "- Creer une nouvelle table 'listes_meres' dans la base\n\n" +
+        "Continuer ?",
+    )
+  ) {
+    return;
+  }
+
+  showGlobalProgress(20, true);
+  showNotificationWithProgress(
+    "Creation de la liste mere en cours...",
+    30,
+    true,
+  );
+
+  try {
+    await waitForApi();
+    const activeDbPath = sessionStorage.getItem("current_db_path");
+    const result = await window.pywebview.api.create_master_list(activeDbPath);
+
+    showGlobalProgress(100, true);
+    showNotificationWithProgress("Liste mere creee !", 100, true);
+
+    if (result?.success) {
+      let msg = result.message || "Liste mere creee avec succes.";
+      if (result.total_noms_vides_ignores > 0) {
+        msg += `\n\n${result.total_noms_vides_ignores} ligne(s) ignoree(s) car nom vide.`;
+      }
+      showNotification(msg, true);
+      logUserAction(
+        `Creation de la liste mere : ${result.total_persons} personne(s)`,
+      );
+
+      // Recharger la liste des tables
+      const toggleChecked = document.getElementById(
+        "toggle-show-tables-list",
+      )?.checked;
+      if (toggleChecked) {
+        await loadDatabaseDetails(activeDbPath);
+      }
+    } else {
+      showNotification(
+        result?.message || "Erreur lors de la creation de la liste mere.",
+        false,
+      );
+    }
+  } catch (error) {
+    showGlobalProgress(0, false);
+    console.error(error);
+    showNotification("Erreur lors de la creation de la liste mere.", false);
+  }
+}
+
+// ============================================
+// ACTIVITES UTILISATEUR
+// ============================================
 async function loadUserActivities() {
   try {
     await waitForApi();
@@ -747,7 +1583,7 @@ async function loadUserActivities() {
                                     <i class="fas fa-history" style="margin-right: 8px; color: var(--primary-color, #4f46e5);"></i> 
                                     ${escapeHtml(act.text)}
                                     <small style="color: var(--text-muted, gray); margin-left: 8px; font-weight: 400;">
-                                        (${escapeHtml(act.user || "User")})
+                                        (${escapeHtml(act.user || "Utilisateur")})
                                     </small>
                                 </span>
                                 <small style="color: var(--text-muted, gray); white-space: nowrap;">${escapeHtml(act.date)}</small>
@@ -762,7 +1598,7 @@ async function loadUserActivities() {
       if (emptyLabel) emptyLabel.classList.remove("hidden");
     }
   } catch (e) {
-    console.error("Error loading activity:", e);
+    console.error("Erreur lors du chargement des activites:", e);
   }
 }
 
@@ -774,15 +1610,1221 @@ async function logUserAction(actionText) {
       loadUserActivities();
     }
   } catch (err) {
-    console.error("Error logging action:", err);
+    console.error("Erreur lors de l'enregistrement de l'action:", err);
   }
 }
 
-// === MANIPULATION DES DONNÉES ===
-// === MANIPULATION DES DONNÉES - VERSION CORRIGÉE ===
+// ============================================
+// BOITE DE DIALOGUE D'EXPORT
+// ============================================
+function showExportDialog(onExport) {
+  const overlay = document.createElement("div");
+  overlay.className = "export-dialog-overlay";
+  overlay.style.cssText = `
+    position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+    background: rgba(0, 0, 0, 0.5); backdrop-filter: blur(5px);
+    z-index: 99999; display: flex; justify-content: center; align-items: center;
+  `;
+  overlay.innerHTML = `
+    <div style="background: #ffffff; border-radius: 12px; padding: 2rem; max-width: 400px; width: 90%; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3); text-align: center;">
+      <h3 style="margin: 0 0 0.5rem 0; color: #1a1a2e;"><i class="fas fa-file-export"></i> Exporter</h3>
+      <p style="color: #64748b; margin-bottom: 1.5rem;">Choisissez le format d'exportation :</p>
+      <div style="display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
+        <button data-format="pdf" style="padding: 0.6rem 1.5rem; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.95rem; transition: all 0.2s; background: #c0392b; color: white;">
+          <i class="fas fa-file-pdf"></i> PDF
+        </button>
+        <button data-format="excel" style="padding: 0.6rem 1.5rem; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.95rem; transition: all 0.2s; background: #27ae60; color: white;">
+          <i class="fas fa-file-excel"></i> Excel
+        </button>
+        <button data-format="cancel" style="padding: 0.6rem 1.5rem; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.95rem; transition: all 0.2s; background: #6c757d; color: white;">
+          <i class="fas fa-times"></i> Annuler
+        </button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+
+  overlay.querySelectorAll("button").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const format = btn.dataset.format;
+      overlay.remove();
+      if (format !== "cancel" && typeof onExport === "function") {
+        onExport(format);
+      }
+    });
+  });
+}
+
+// ============================================
+// MODAL DE MODIFICATION / AJOUT
+// ============================================
+function openEditModal(tableName, rowId, rowData, isNew = false) {
+  const overlay = document.createElement("div");
+  overlay.className = "edit-modal-overlay";
+
+  let formFields = "";
+  Object.keys(rowData).forEach((key) => {
+    if (key === "rowid" || key === "id") {
+      if (isNew) return;
+    }
+    const value =
+      rowData[key] === null || rowData[key] === undefined
+        ? ""
+        : String(rowData[key]);
+    formFields += `
+      <div class="form-group">
+        <label for="edit-field-${escapeHtml(key)}">${escapeHtml(key)}</label>
+        <input type="text" id="edit-field-${escapeHtml(key)}" data-column="${escapeHtml(key)}" value="${escapeHtml(value)}" />
+      </div>
+    `;
+  });
+
+  const title = isNew ? "Ajouter une ligne" : `Modifier la ligne #${rowId}`;
+
+  overlay.innerHTML = `
+    <div class="edit-modal-box">
+      <h3><i class="fas fa-${isNew ? "plus" : "edit"}" style="color: ${isNew ? "#27ae60" : "#f39c12"};"></i> ${title}</h3>
+      <p style="color: #64748b; font-size: 0.85rem; margin-bottom: 1rem;">
+        Table : <strong>${escapeHtml(tableName)}</strong>
+      </p>
+      <div id="edit-form-fields">
+        ${formFields}
+      </div>
+      <div class="modal-actions">
+        <button class="btn-cancel" id="btn-cancel-edit">Annuler</button>
+        <button class="btn-save" id="btn-save-edit">
+          <i class="fas fa-save"></i> ${isNew ? "Ajouter" : "Enregistrer"}
+        </button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+
+  const closeModal = () => overlay.remove();
+  overlay
+    .querySelector("#btn-cancel-edit")
+    .addEventListener("click", closeModal);
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) closeModal();
+  });
+
+  overlay
+    .querySelector("#btn-save-edit")
+    .addEventListener("click", async () => {
+      const inputs = overlay.querySelectorAll("#edit-form-fields input");
+
+      if (isNew) {
+        const values = {};
+        inputs.forEach((input) => {
+          const col = input.getAttribute("data-column");
+          if (input.value && input.value.trim() !== "") {
+            values[col] = input.value;
+          }
+        });
+
+        if (Object.keys(values).length === 0) {
+          showNotification("Veuillez remplir au moins un champ.", false);
+          return;
+        }
+
+        try {
+          await waitForApi();
+          const activeDbPath = sessionStorage.getItem("current_db_path");
+          showGlobalProgress(50, true);
+
+          const res = await window.pywebview.api.insert_table_row(
+            tableName,
+            values,
+            activeDbPath,
+          );
+
+          showGlobalProgress(100, true);
+
+          if (res && res.success) {
+            showNotification("Ligne ajoutee avec succes.", true);
+            logUserAction(`Ajout d'une ligne dans ${tableName}`);
+            closeModal();
+
+            if (currentManipulateTable === tableName) {
+              await loadManipulateTableData(tableName);
+            }
+          } else {
+            showNotification(res?.message || "Erreur lors de l'ajout.", false);
+          }
+        } catch (e) {
+          console.error(e);
+          showNotification("Erreur lors de l'ajout.", false);
+        }
+      } else {
+        const updates = {};
+        inputs.forEach((input) => {
+          const col = input.getAttribute("data-column");
+          const newValue = input.value;
+          const oldValue =
+            rowData[col] === null || rowData[col] === undefined
+              ? ""
+              : String(rowData[col]);
+
+          if (newValue !== oldValue) {
+            updates[col] = newValue;
+          }
+        });
+
+        if (Object.keys(updates).length === 0) {
+          showNotification("Aucune modification a enregistrer.", false);
+          return;
+        }
+
+        try {
+          await waitForApi();
+          const activeDbPath = sessionStorage.getItem("current_db_path");
+          showGlobalProgress(50, true);
+
+          let successCount = 0;
+          for (const [col, val] of Object.entries(updates)) {
+            const res = await window.pywebview.api.update_table_row(
+              tableName,
+              rowId,
+              col,
+              val,
+              activeDbPath,
+            );
+            if (res && res.success) successCount++;
+          }
+
+          showGlobalProgress(100, true);
+
+          if (successCount > 0) {
+            showNotification(
+              `${successCount} champ(s) modifie(s) avec succes.`,
+              true,
+            );
+            logUserAction(
+              `Modification de la ligne #${rowId} dans ${tableName}`,
+            );
+
+            for (const dup of allDuplicates) {
+              if (dup.tableName === tableName) {
+                if (dup.row_index === rowId) {
+                  Object.assign(dup.data, updates);
+                }
+                if (dup.reference_id === rowId) {
+                  Object.assign(dup.reference_data, updates);
+                }
+              }
+            }
+
+            if (typeof renderDuplicatesWithFilter === "function") {
+              renderDuplicatesWithFilter();
+            }
+
+            if (currentManipulateTable === tableName) {
+              await loadManipulateTableData(tableName);
+            }
+
+            closeModal();
+          } else {
+            showNotification("Erreur lors de la modification.", false);
+          }
+        } catch (e) {
+          console.error(e);
+          showNotification("Erreur lors de la modification.", false);
+        }
+      }
+    });
+}
+
+// ============================================
+// GESTION DES DOUBLONS
+// ============================================
+async function loadDuplicateTableFilter() {
+  const filterSelect = document.getElementById("dup-table-filter");
+  if (!filterSelect) return;
+
+  try {
+    await waitForApi();
+    const activeDbPath = sessionStorage.getItem("current_db_path");
+    const tablesRes =
+      await window.pywebview.api.get_database_table_names(activeDbPath);
+
+    if (tablesRes && tablesRes.success) {
+      filterSelect.innerHTML =
+        '<option value="">-- Toutes les tables --</option>';
+      tablesRes.tables.forEach((table) => {
+        const opt = document.createElement("option");
+        opt.value = table;
+        opt.textContent = table;
+        filterSelect.appendChild(opt);
+      });
+    }
+  } catch (e) {
+    console.error("Erreur lors du chargement des tables pour le filtre:", e);
+  }
+}
+
+function initDuplicatesPage() {
+  const btnCheckDups = document.querySelector("#btn-check-duplicates");
+  const runBtn = document.querySelector("#btn-run-dup-scan");
+  const cancelBtn = document.querySelector("#btn-cancel-dup-scan");
+  const refreshTablesBtn = document.querySelector("#btn-refresh-tables");
+  const refreshDupsBtn = document.querySelector("#btn-refresh-dups");
+  const tableFilter = document.querySelector("#dup-table-filter");
+  const btnSelectAll = document.querySelector("#btn-select-all-dups");
+  const btnEditDups = document.querySelector("#btn-edit-selected-dups");
+  const btnDeleteDups = document.querySelector("#btn-delete-selected-dups");
+  const btnExportDups = document.querySelector("#btn-export-dups");
+  const btnExpandDups = document.querySelector("#btn-expand-dups");
+  const btnAddDup = document.querySelector("#btn-add-dups");
+
+  if (btnCheckDups) {
+    btnCheckDups.addEventListener("click", () => {
+      goToDuplicates();
+    });
+  }
+
+  const radioButtons = document.querySelectorAll('input[name="dup-algorithm"]');
+  const labels = document.querySelectorAll(".dup-algorithm-selector label");
+
+  radioButtons.forEach((radio, index) => {
+    radio.addEventListener("change", () => {
+      labels.forEach((l, i) => {
+        l.classList.toggle("active", i === index);
+      });
+    });
+  });
+
+  if (refreshTablesBtn) {
+    refreshTablesBtn.addEventListener("click", async () => {
+      await loadDuplicateTableFilter();
+      showNotification("Liste des tables actualisee.", true);
+    });
+  }
+
+  if (refreshDupsBtn) {
+    refreshDupsBtn.addEventListener("click", async () => {
+      if (allDuplicates.length === 0) {
+        showNotification(
+          "Aucun resultat a actualiser. Lancez d'abord une analyse.",
+          false,
+        );
+        return;
+      }
+      showNotification("Actualisation des resultats...", true);
+      await refreshDuplicateResults();
+    });
+  }
+
+  if (tableFilter) {
+    tableFilter.addEventListener("change", () => {
+      selectedDuplicateTables = tableFilter.value ? [tableFilter.value] : [];
+      renderDuplicatesWithFilter();
+    });
+  }
+
+  if (runBtn) {
+    runBtn.addEventListener("click", async () => {
+      const selectedAlgo =
+        document.querySelector('input[name="dup-algorithm"]:checked')?.value ||
+        "general";
+      await runDuplicateScan(selectedAlgo);
+    });
+  }
+
+  if (cancelBtn) {
+    cancelBtn.addEventListener("click", () => {
+      duplicateScanCancelled = true;
+      showNotification("Analyse annulee.", false);
+    });
+  }
+
+  if (btnSelectAll) {
+    btnSelectAll.addEventListener("click", () => {
+      const checkboxes = document.querySelectorAll(".dup-checkbox");
+      if (checkboxes.length === 0) return;
+      const allChecked = Array.from(checkboxes).every((chk) => chk.checked);
+
+      checkboxes.forEach((chk) => {
+        chk.checked = !allChecked;
+      });
+      btnSelectAll.textContent = allChecked
+        ? "Tout selectionner"
+        : "Tout deselectionner";
+      updateSelectAllButton();
+    });
+  }
+
+  if (btnEditDups) {
+    btnEditDups.addEventListener("click", async () => {
+      const checkedBoxes = document.querySelectorAll(".dup-checkbox:checked");
+      if (checkedBoxes.length === 0) {
+        showNotification(
+          "Veuillez selectionner au moins un element a modifier.",
+          false,
+        );
+        return;
+      }
+      if (checkedBoxes.length > 1) {
+        showNotification(
+          "Veuillez selectionner un seul element a la fois pour la modification.",
+          false,
+        );
+        return;
+      }
+
+      const chk = checkedBoxes[0];
+      const tableName = chk.getAttribute("data-table");
+      const rowIndex = parseInt(chk.getAttribute("data-rowid"));
+
+      const duplicate = allDuplicates.find(
+        (d) => d.tableName === tableName && d.row_index === rowIndex,
+      );
+
+      if (!duplicate) {
+        showNotification(
+          "Impossible de trouver les donnees de cette ligne.",
+          false,
+        );
+        return;
+      }
+
+      openEditModal(tableName, rowIndex, duplicate.data, false);
+    });
+  }
+
+  if (btnAddDup) {
+    btnAddDup.addEventListener("click", async () => {
+      const activeDbPath = sessionStorage.getItem("current_db_path");
+      const tablesRes =
+        await window.pywebview.api.get_database_table_names(activeDbPath);
+      if (!tablesRes || !tablesRes.tables || tablesRes.tables.length === 0) {
+        showNotification("Aucune table disponible.", false);
+        return;
+      }
+
+      const tableName = tablesRes.tables[0];
+      const struct =
+        await window.pywebview.api.get_database_structure_matrix(activeDbPath);
+      const columns = struct.structure[tableName] || [];
+
+      const emptyRow = {};
+      columns.forEach((col) => {
+        if (col !== "id" && col !== "rowid") {
+          emptyRow[col] = "";
+        }
+      });
+
+      openEditModal(tableName, null, emptyRow, true);
+    });
+  }
+
+  if (btnDeleteDups) {
+    btnDeleteDups.addEventListener("click", async () => {
+      await deleteSelectedDuplicatesWithProgress();
+    });
+  }
+
+  if (btnExportDups) {
+    btnExportDups.addEventListener("click", () => {
+      exportDuplicatesWithDialog();
+    });
+  }
+
+  if (btnExpandDups) {
+    btnExpandDups.addEventListener("click", () => {
+      const contentElem = document.querySelector("#db-results-content");
+      if (!contentElem || !contentElem.innerHTML.trim()) {
+        showNotification("Aucun resultat a agrandir.", false);
+        return;
+      }
+      openFullScreenModal(
+        "Gestion avancee des doublons - Vue agrandie",
+        contentElem.innerHTML,
+      );
+    });
+  }
+}
+
+async function runDuplicateScan(selectedAlgo) {
+  const resultsContainer = document.getElementById("dup-results-container");
+  const resultsBody = document.getElementById("db-results-content");
+  const statusDiv = document.getElementById("dup-scan-status");
+  const countBadge = document.getElementById("dup-results-count");
+  const toolbar = document.getElementById("duplicate-actions-toolbar");
+  const cancelBtn = document.getElementById("btn-cancel-dup-scan");
+  const runBtn = document.getElementById("btn-run-dup-scan");
+  const tableFilter = document.getElementById("dup-table-filter");
+
+  if (!resultsBody || !statusDiv) return;
+
+  resultsContainer.classList.remove("hidden");
+  toolbar.classList.remove("hidden");
+  resultsBody.innerHTML =
+    '<p style="color: var(--text-muted, #64748b);">Analyse en cours...</p>';
+  statusDiv.textContent = `Analyse avec l'algorithme "${selectedAlgo === "general" ? "General" : "CIN + NOM + COMMUNE + FKT"}"...`;
+  duplicateScanCancelled = false;
+
+  if (cancelBtn) cancelBtn.style.display = "inline-block";
+  if (runBtn) runBtn.disabled = true;
+
+  try {
+    await waitForApi();
+    const activeDbPath = sessionStorage.getItem("current_db_path");
+
+    const tablesRes =
+      await window.pywebview.api.get_database_table_names(activeDbPath);
+    if (!tablesRes || !tablesRes.success || tablesRes.tables.length === 0) {
+      resultsBody.innerHTML =
+        "<p>Aucune table trouvee dans cette base de donnees.</p>";
+      return;
+    }
+
+    let tablesToScan = tablesRes.tables;
+    const filterValue = tableFilter?.value;
+    if (filterValue) {
+      tablesToScan = [filterValue];
+    }
+
+    allDuplicates = [];
+
+    for (let i = 0; i < tablesToScan.length; i++) {
+      if (duplicateScanCancelled) break;
+      const currentTable = tablesToScan[i];
+      const pct = Math.round(((i + 1) / tablesToScan.length) * 100);
+
+      showNotificationWithProgress(
+        `Analyse des doublons : ${currentTable} (${i + 1}/${tablesToScan.length})`,
+        pct,
+        true,
+      );
+      showGlobalProgress(pct, true);
+
+      const scanRes = await window.pywebview.api.scan_table_duplicates_advanced(
+        currentTable,
+        selectedAlgo,
+        activeDbPath,
+      );
+
+      if (duplicateScanCancelled) break;
+      if (scanRes && scanRes.success && scanRes.duplicates) {
+        scanRes.duplicates.forEach((dup) => {
+          allDuplicates.push({ ...dup, tableName: currentTable });
+        });
+      }
+    }
+
+    if (duplicateScanCancelled) {
+      statusDiv.textContent = "Analyse annulee.";
+      if (cancelBtn) cancelBtn.style.display = "none";
+      if (runBtn) runBtn.disabled = false;
+      return;
+    }
+
+    showGlobalProgress(100, true);
+    currentDuplicatesAlgo = selectedAlgo;
+
+    if (allDuplicates.length === 0) {
+      resultsBody.innerHTML =
+        "<p style='color: var(--success, #10b981);'>Aucun doublon trouve.</p>";
+      statusDiv.textContent = "Analyse terminee : aucun doublon trouve.";
+      if (countBadge) countBadge.textContent = "0";
+    } else {
+      showNotification(`${allDuplicates.length} doublon(s) trouve(s).`, true);
+      statusDiv.textContent = `${allDuplicates.length} doublon(s) identifie(s) avec l'algorithme "${selectedAlgo === "general" ? "General" : "CIN + NOM + COMMUNE + FKT"}"`;
+      if (countBadge) countBadge.textContent = allDuplicates.length;
+
+      if (allDuplicates.length > 0 && allDuplicates[0].data) {
+        currentColumns = Object.keys(allDuplicates[0].data);
+      }
+
+      renderDuplicatesWithFilter();
+    }
+  } catch (err) {
+    console.error("Erreur lors de l'analyse des doublons:", err);
+    resultsBody.innerHTML = `<p style='color: var(--error, #ef4444);'>Erreur : ${err.message}</p>`;
+    showNotification(`Erreur: ${err.message}`, false);
+  } finally {
+    if (cancelBtn) cancelBtn.style.display = "none";
+    if (runBtn) runBtn.disabled = false;
+  }
+}
+
+function renderDuplicatesWithFilter() {
+  const resultsBody = document.getElementById("db-results-content");
+  if (!resultsBody) return;
+
+  let filteredDuplicates = allDuplicates;
+  if (selectedDuplicateTables.length > 0) {
+    filteredDuplicates = allDuplicates.filter((d) =>
+      selectedDuplicateTables.includes(d.tableName),
+    );
+  }
+
+  if (filteredDuplicates.length === 0) {
+    resultsBody.innerHTML =
+      "<p style='color: var(--warning, #f39c12);'>Aucun doublon a afficher avec les filtres actuels.</p>";
+    return;
+  }
+
+  const MAX_DISPLAY = 500;
+  let displayDuplicates = filteredDuplicates;
+  let hasMore = false;
+
+  if (filteredDuplicates.length > MAX_DISPLAY) {
+    displayDuplicates = filteredDuplicates.slice(0, MAX_DISPLAY);
+    hasMore = true;
+  }
+
+  let allColumns = currentColumns;
+  if (
+    allColumns.length === 0 &&
+    displayDuplicates.length > 0 &&
+    displayDuplicates[0].data
+  ) {
+    allColumns = Object.keys(displayDuplicates[0].data);
+  }
+
+  let html = `
+    <div style="margin-bottom: 12px; font-weight: bold; color: var(--primary-color, #4f46e5);">
+      ${filteredDuplicates.length} doublon(s) affiche(s)
+      ${selectedDuplicateTables.length > 0 ? `(filtre sur : ${selectedDuplicateTables.join(", ")})` : ""}
+      ${hasMore ? `<span style="color: orange; font-weight: normal;">(Affichage des ${MAX_DISPLAY} premiers)</span>` : ""}
+    </div>
+    <div class="duplicates-table-wrapper" style="max-height: 500px; overflow: auto;">
+      <table style="width: 100%; border-collapse: collapse; font-size: 0.75rem; background: var(--bg-container, #fff);">
+        <thead style="position: sticky; top: 0; z-index: 10; background: var(--bg-secondary, #f1f5f9);">
+          <tr>
+            <th style="width: 40px; text-align: center; padding: 0.3rem 0.4rem; border: 1px solid var(--border-color, #e2e8f0);">Sel.</th>
+            <th style="width: 60px; text-align: center; padding: 0.3rem 0.4rem; border: 1px solid var(--border-color, #e2e8f0);">Actions</th>
+            <th style="padding: 0.3rem 0.4rem; border: 1px solid var(--border-color, #e2e8f0);">Table</th>
+            <th style="padding: 0.3rem 0.4rem; border: 1px solid var(--border-color, #e2e8f0);">Type</th>
+            <th style="padding: 0.3rem 0.4rem; border: 1px solid var(--border-color, #e2e8f0);">ID</th>
+  `;
+
+  allColumns.forEach((col) => {
+    html += `<th style="padding: 0.3rem 0.4rem; border: 1px solid var(--border-color, #e2e8f0);">${escapeHtml(col)}</th>`;
+  });
+
+  html += `
+          </tr>
+        </thead>
+        <tbody>
+  `;
+
+  for (let idx = 0; idx < displayDuplicates.length; idx++) {
+    const dup = displayDuplicates[idx];
+    const tableName = escapeHtml(dup.tableName || dup.table || "");
+    const rowIndex = escapeHtml(String(dup.row_index || ""));
+    const refId = escapeHtml(String(dup.reference_id || ""));
+
+    const dupData = dup.data || {};
+    const refData = dup.reference_data || {};
+
+    html += `
+      <tr style="border-bottom: 1px solid var(--border-color, #e2e8f0); background: ${idx % 2 === 0 ? "transparent" : "rgba(231, 76, 60, 0.03)"};">
+        <td style="text-align: center; padding: 0.2rem 0.3rem; border: 1px solid var(--border-color, #e2e8f0);">
+          <input type="checkbox" class="dup-checkbox" 
+                 data-index="${idx}" 
+                 data-table="${tableName}" 
+                 data-rowid="${rowIndex}" 
+                 checked 
+                 style="width: 14px; height: 14px; cursor: pointer;" />
+        </td>
+        <td style="text-align: center; padding: 0.2rem 0.3rem; border: 1px solid var(--border-color, #e2e8f0);">
+          <button class="btn-edit-row" data-table="${tableName}" data-rowid="${rowIndex}" title="Modifier cette ligne" style="background: #f39c12; color: white; border: none; padding: 2px 6px; border-radius: 3px; cursor: pointer; font-size: 0.65rem;">
+            <i class="fas fa-edit"></i>
+          </button>
+          <button class="btn-delete-row-single" data-table="${tableName}" data-rowid="${rowIndex}" title="Supprimer cette ligne" style="background: #dc3545; color: white; border: none; padding: 2px 6px; border-radius: 3px; cursor: pointer; font-size: 0.65rem; margin-left: 2px;">
+            <i class="fas fa-trash"></i>
+          </button>
+        </td>
+        <td style="font-weight: 600; padding: 0.2rem 0.3rem; border: 1px solid var(--border-color, #e2e8f0); font-size: 0.7rem;">${tableName}</td>
+        <td style="padding: 0.2rem 0.3rem; border: 1px solid var(--border-color, #e2e8f0);">
+          <span style="background: #e74c3c; color: white; padding: 1px 6px; border-radius: 3px; font-size: 0.6rem; font-weight: 600;">DOUBLON</span>
+        </td>
+        <td style="font-weight: 600; padding: 0.2rem 0.3rem; border: 1px solid var(--border-color, #e2e8f0);">#${rowIndex}</td>
+    `;
+
+    allColumns.forEach((col) => {
+      let val = dupData[col];
+      if (val === null || val === undefined || val === "") {
+        val = '<span style="color: #999; font-style: italic;">NULL</span>';
+      } else {
+        val = escapeHtml(String(val));
+      }
+      html += `<td style="padding: 0.2rem 0.3rem; border: 1px solid var(--border-color, #e2e8f0); font-size: 0.65rem; max-width: 150px; word-break: break-word;">${val}</td>`;
+    });
+
+    html += `</tr>`;
+
+    html += `
+      <tr style="border-bottom: 2px solid var(--border-color, #e2e8f0); background: ${idx % 2 === 0 ? "rgba(39, 174, 96, 0.03)" : "transparent"};">
+        <td style="padding: 0.2rem 0.3rem; border: 1px solid var(--border-color, #e2e8f0);"></td>
+        <td style="text-align: center; padding: 0.2rem 0.3rem; border: 1px solid var(--border-color, #e2e8f0);">
+          <button class="btn-edit-row" data-table="${tableName}" data-rowid="${refId}" title="Modifier la reference" style="background: #f39c12; color: white; border: none; padding: 2px 6px; border-radius: 3px; cursor: pointer; font-size: 0.65rem;">
+            <i class="fas fa-edit"></i>
+          </button>
+        </td>
+        <td style="padding: 0.2rem 0.3rem; border: 1px solid var(--border-color, #e2e8f0);"></td>
+        <td style="padding: 0.2rem 0.3rem; border: 1px solid var(--border-color, #e2e8f0);">
+          <span style="background: #27ae60; color: white; padding: 1px 6px; border-radius: 3px; font-size: 0.6rem; font-weight: 600;">REFERENCE</span>
+        </td>
+        <td style="font-weight: 600; padding: 0.2rem 0.3rem; border: 1px solid var(--border-color, #e2e8f0);">#${refId}</td>
+    `;
+
+    allColumns.forEach((col) => {
+      let val = refData[col];
+      if (val === null || val === undefined || val === "") {
+        val = '<span style="color: #999; font-style: italic;">NULL</span>';
+      } else {
+        val = escapeHtml(String(val));
+      }
+      html += `<td style="padding: 0.2rem 0.3rem; border: 1px solid var(--border-color, #e2e8f0); font-size: 0.65rem; max-width: 150px; word-break: break-word;">${val}</td>`;
+    });
+
+    html += `</tr>`;
+  }
+
+  html += `
+        </tbody>
+      </table>
+    </div>
+    ${hasMore ? `<p style="color: orange; font-size: 0.85rem; margin-top: 8px;">${filteredDuplicates.length - MAX_DISPLAY} doublons supplementaires non affiches.</p>` : ""}
+  `;
+
+  resultsBody.innerHTML = html;
+
+  document.querySelectorAll(".dup-checkbox").forEach((chk) => {
+    chk.addEventListener("change", updateSelectAllButton);
+  });
+
+  document.querySelectorAll(".btn-edit-row").forEach((btn) => {
+    btn.addEventListener("click", function (e) {
+      e.preventDefault();
+      const tableName = this.getAttribute("data-table");
+      const rowId = parseInt(this.getAttribute("data-rowid"));
+
+      let rowData = null;
+      for (const dup of allDuplicates) {
+        if (
+          dup.tableName === tableName &&
+          (dup.row_index === rowId || dup.reference_id === rowId)
+        ) {
+          if (dup.row_index === rowId) {
+            rowData = dup.data;
+          } else {
+            rowData = dup.reference_data;
+          }
+          break;
+        }
+      }
+
+      if (!rowData) {
+        showNotification(
+          "Impossible de trouver les donnees de cette ligne.",
+          false,
+        );
+        return;
+      }
+
+      openEditModal(tableName, rowId, rowData, false);
+    });
+  });
+
+  document.querySelectorAll(".btn-delete-row-single").forEach((btn) => {
+    btn.addEventListener("click", async function (e) {
+      e.preventDefault();
+      const tableName = this.getAttribute("data-table");
+      const rowId = parseInt(this.getAttribute("data-rowid"));
+
+      if (
+        !confirm(`Supprimer la ligne #${rowId} de la table "${tableName}" ?`)
+      ) {
+        return;
+      }
+
+      try {
+        await waitForApi();
+        const activeDbPath = sessionStorage.getItem("current_db_path");
+        const res = await window.pywebview.api.delete_table_row(
+          tableName,
+          rowId,
+          activeDbPath,
+        );
+
+        if (res && res.success) {
+          showNotification("Ligne supprimee avec succes.", true);
+          logUserAction(`Suppression de la ligne #${rowId} dans ${tableName}`);
+          allDuplicates = allDuplicates.filter(
+            (d) =>
+              !(
+                d.tableName === tableName &&
+                (d.row_index === rowId || d.reference_id === rowId)
+              ),
+          );
+
+          const countBadge = document.getElementById("dup-results-count");
+          if (countBadge) countBadge.textContent = allDuplicates.length;
+
+          renderDuplicatesWithFilter();
+        } else {
+          showNotification(
+            res?.message || "Erreur lors de la suppression.",
+            false,
+          );
+        }
+      } catch (err) {
+        console.error(err);
+        showNotification("Erreur lors de la suppression.", false);
+      }
+    });
+  });
+
+  updateSelectAllButton();
+}
+
+async function refreshDuplicateResults() {
+  if (allDuplicates.length === 0) {
+    showNotification("Aucun resultat a actualiser.", false);
+    return;
+  }
+
+  try {
+    await waitForApi();
+    const activeDbPath = sessionStorage.getItem("current_db_path");
+
+    showGlobalProgress(30, true);
+
+    let updatedDuplicates = [];
+    const tables = [...new Set(allDuplicates.map((d) => d.tableName))];
+    let processed = 0;
+
+    for (const table of tables) {
+      const tableData = await window.pywebview.api.get_table_rows(
+        table,
+        activeDbPath,
+        5000,
+      );
+      processed++;
+      showGlobalProgress(
+        30 + Math.round((processed / tables.length) * 60),
+        true,
+      );
+
+      if (tableData && tableData.success) {
+        const rowsMap = {};
+        tableData.data.forEach((row, idx) => {
+          rowsMap[idx + 1] = row;
+        });
+
+        const tableDuplicates = allDuplicates.filter(
+          (d) => d.tableName === table,
+        );
+        for (const dup of tableDuplicates) {
+          const newDupData = rowsMap[dup.row_index];
+          const newRefData = rowsMap[dup.reference_id];
+
+          if (newDupData && newRefData) {
+            updatedDuplicates.push({
+              ...dup,
+              data: newDupData,
+              reference_data: newRefData,
+            });
+          }
+        }
+      }
+    }
+
+    showGlobalProgress(100, true);
+
+    const removedCount = allDuplicates.length - updatedDuplicates.length;
+    allDuplicates = updatedDuplicates;
+
+    const countBadge = document.getElementById("dup-results-count");
+    if (countBadge) countBadge.textContent = allDuplicates.length;
+
+    renderDuplicatesWithFilter();
+
+    if (removedCount > 0) {
+      showNotification(
+        `${removedCount} doublon(s) supprime(s) depuis la derniere analyse.`,
+        true,
+      );
+    } else {
+      showNotification("Resultats actualises.", true);
+    }
+  } catch (e) {
+    console.error("Erreur lors de l'actualisation:", e);
+    showNotification("Erreur lors de l'actualisation.", false);
+  }
+}
+
+// ============================================
+// SUPPRESSION AVEC BARRE DE PROGRESSION
+// ============================================
+async function deleteSelectedDuplicatesWithProgress() {
+  const checkedBoxes = document.querySelectorAll(".dup-checkbox:checked");
+  if (checkedBoxes.length === 0) {
+    showNotification(
+      "Veuillez selectionner au moins un doublon a supprimer.",
+      false,
+    );
+    return;
+  }
+
+  if (
+    !confirm(
+      `Attention : vous allez supprimer definitivement ${checkedBoxes.length} doublon(s). Continuer ?`,
+    )
+  ) {
+    return;
+  }
+
+  try {
+    await waitForApi();
+    let successCount = 0;
+    let errorCount = 0;
+    const total = checkedBoxes.length;
+    const activeDbPath = sessionStorage.getItem("current_db_path");
+
+    showNotificationWithProgress(
+      `Suppression des doublons en cours... (0/${total})`,
+      0,
+      true,
+    );
+    showGlobalProgress(0, true);
+
+    const container = document.querySelector("#notification-container");
+    let progressNotif = document.getElementById("duplicate-delete-progress");
+    if (!progressNotif) {
+      progressNotif = document.createElement("div");
+      progressNotif.id = "duplicate-delete-progress";
+      progressNotif.className = "notification notification-success";
+      progressNotif.style.display = "block";
+      progressNotif.style.background = "rgba(15, 23, 42, 0.95)";
+      container.appendChild(progressNotif);
+    }
+
+    for (let i = 0; i < checkedBoxes.length; i++) {
+      const chk = checkedBoxes[i];
+      const tableName = chk.getAttribute("data-table");
+      const rowIndex = chk.getAttribute("data-rowid");
+
+      if (window.pywebview?.api?.delete_table_row) {
+        try {
+          const res = await window.pywebview.api.delete_table_row(
+            tableName,
+            rowIndex,
+            activeDbPath,
+          );
+          if (res && res.success) {
+            successCount++;
+            allDuplicates = allDuplicates.filter(
+              (d) =>
+                !(
+                  d.tableName === tableName &&
+                  d.row_index === parseInt(rowIndex)
+                ),
+            );
+          } else {
+            errorCount++;
+          }
+        } catch (err) {
+          errorCount++;
+          console.error(`Erreur suppression ligne ${rowIndex}:`, err);
+        }
+      }
+
+      const percentage = Math.round(((i + 1) / total) * 100);
+      const progressText = `Suppression des doublons en cours... (${i + 1}/${total})`;
+
+      progressNotif.innerHTML = `
+        <div style="font-weight: bold; margin-bottom: 4px;">${progressText}</div>
+        <div style="display: flex; justify-content: space-between; font-size: 0.85rem; opacity: 0.9; margin-bottom: 4px;">
+          <span>Progression : ${percentage}%</span>
+          <span>${successCount} supprimes | ${errorCount} erreurs</span>
+        </div>
+        <div style="width: 100%; background: rgba(255,255,255,0.3); height: 6px; border-radius: 3px; overflow: hidden;">
+          <div style="width: ${percentage}%; background: ${percentage < 100 ? "#4f46e5" : "#27ae60"}; height: 100%; transition: width 0.3s ease;"></div>
+        </div>
+      `;
+
+      showGlobalProgress(percentage, true);
+
+      if (i % 10 === 0) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+    }
+
+    setTimeout(() => {
+      if (progressNotif) {
+        progressNotif.style.display = "none";
+        progressNotif.remove();
+      }
+    }, 3000);
+
+    if (errorCount === 0) {
+      showNotification(
+        `${successCount} doublon(s) supprimes avec succes.`,
+        true,
+      );
+    } else {
+      showNotification(
+        `${successCount} supprimes, ${errorCount} erreurs.`,
+        errorCount === 0,
+      );
+    }
+
+    logUserAction(
+      `Suppression de ${successCount} doublons (${errorCount} erreurs)`,
+    );
+
+    const countBadge = document.getElementById("dup-results-count");
+    if (countBadge) countBadge.textContent = allDuplicates.length;
+
+    renderDuplicatesWithFilter();
+
+    if (allDuplicates.length === 0) {
+      document.getElementById("dup-results-container").classList.add("hidden");
+    }
+  } catch (err) {
+    console.error("Erreur lors de la suppression:", err);
+    showNotification("Erreur lors de la suppression des doublons.", false);
+
+    const progressNotif = document.getElementById("duplicate-delete-progress");
+    if (progressNotif) {
+      progressNotif.style.display = "none";
+      progressNotif.remove();
+    }
+  }
+}
+
+// ============================================
+// EXPORT DES DOUBLONS
+// ============================================
+async function exportDuplicatesWithDialog() {
+  if (allDuplicates.length === 0) {
+    showNotification("Aucun resultat de doublons a exporter.", false);
+    return;
+  }
+
+  showExportDialog(async (format) => {
+    if (format === "pdf") {
+      await exportDuplicatesToPDF();
+    } else if (format === "excel") {
+      await exportDuplicatesToExcel();
+    }
+  });
+}
+
+async function exportDuplicatesToExcel() {
+  try {
+    let filteredDuplicates = allDuplicates;
+    if (selectedDuplicateTables.length > 0) {
+      filteredDuplicates = allDuplicates.filter((d) =>
+        selectedDuplicateTables.includes(d.tableName),
+      );
+    }
+
+    if (filteredDuplicates.length === 0) {
+      showNotification("Aucune donnee a exporter.", false);
+      return;
+    }
+
+    const result = await window.pywebview.api.select_excel_export_file();
+    if (!result || !result.success) {
+      if (result?.message !== "Aucun fichier selectionne.") {
+        showNotification(
+          result?.message || "Erreur lors de la selection du fichier.",
+          false,
+        );
+      }
+      return;
+    }
+
+    const data = [];
+    filteredDuplicates.forEach((dup) => {
+      const rowData = {
+        Table: dup.tableName,
+        Type: "DOUBLON",
+        ID: dup.row_index,
+      };
+      Object.assign(rowData, dup.data || {});
+      data.push(rowData);
+
+      const refData = {
+        Table: dup.tableName,
+        Type: "REFERENCE",
+        ID: dup.reference_id,
+      };
+      Object.assign(refData, dup.reference_data || {});
+      data.push(refData);
+    });
+
+    showNotificationWithProgress("Export des doublons vers Excel...", 30, true);
+
+    const exportResult = await window.pywebview.api.generate_excel_from_data(
+      result.file_path,
+      data,
+    );
+
+    showNotificationWithProgress("Export termine.", 100, true);
+
+    if (exportResult && exportResult.success) {
+      showNotification(`Excel exporte : ${result.file_path}`, true);
+      logUserAction(`Export des doublons vers Excel : ${result.file_path}`);
+    } else {
+      showNotification(
+        exportResult?.message || "Erreur lors de l'export Excel.",
+        false,
+      );
+    }
+  } catch (error) {
+    console.error("Erreur export Excel:", error);
+    showNotification("Erreur lors de l'export Excel.", false);
+  }
+}
+
+async function exportDuplicatesToPDF() {
+  try {
+    let filteredDuplicates = allDuplicates;
+    if (selectedDuplicateTables.length > 0) {
+      filteredDuplicates = allDuplicates.filter((d) =>
+        selectedDuplicateTables.includes(d.tableName),
+      );
+    }
+
+    if (filteredDuplicates.length === 0) {
+      showNotification("Aucune donnee a exporter.", false);
+      return;
+    }
+
+    const result = await window.pywebview.api.select_pdf_file();
+    if (!result || !result.success) {
+      if (result?.message !== "Aucun fichier selectionne.") {
+        showNotification(
+          result?.message || "Erreur lors de la selection du fichier.",
+          false,
+        );
+      }
+      return;
+    }
+
+    const allColumns =
+      currentColumns.length > 0
+        ? currentColumns
+        : Object.keys(filteredDuplicates[0]?.data || {});
+
+    let htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="UTF-8">
+        <title>Rapport des doublons</title>
+        <style>
+          * { margin: 0; padding: 0; box-sizing: border-box; }
+          body { font-family: 'DejaVu Sans', Arial, sans-serif; padding: 20px; color: #1a1a2e; background: #ffffff; font-size: 8px; }
+          .header { text-align: center; padding-bottom: 15px; border-bottom: 2px solid #4f46e5; margin-bottom: 15px; }
+          .header h1 { color: #4f46e5; font-size: 18px; }
+          .header .subtitle { color: #666; font-size: 10px; margin-top: 3px; }
+          .info-grid { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 8px; background: #f8fafc; padding: 10px 15px; border-radius: 6px; margin-bottom: 15px; border: 1px solid #e2e8f0; }
+          .info-grid .label { font-weight: 600; color: #4f46e5; font-size: 7px; text-transform: uppercase; }
+          .info-grid .value { font-size: 10px; }
+          .summary { background: #e0e7ff; padding: 8px 14px; border-radius: 6px; margin-bottom: 12px; border-left: 4px solid #4f46e5; font-weight: 600; font-size: 12px; color: #4f46e5; }
+          table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 6.5px; }
+          th { background: #4f46e5; color: white; padding: 4px 5px; text-align: left; border: 1px solid #4f46e5; }
+          td { padding: 3px 5px; border: 1px solid #e2e8f0; word-wrap: break-word; max-width: 120px; }
+          .dup-row { background: rgba(231, 76, 60, 0.05); }
+          .ref-row { background: rgba(39, 174, 96, 0.05); }
+          .footer { margin-top: 20px; padding-top: 10px; border-top: 1px solid #e2e8f0; text-align: center; color: #94a3b8; font-size: 7px; }
+          @page { margin: 0.8cm; size: A4 landscape; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <h1>Rapport des doublons</h1>
+          <div class="subtitle">Data Manager - Expert Edition</div>
+        </div>
+        <div class="info-grid">
+          <div><div class="label">Date</div><div class="value">${new Date().toLocaleString()}</div></div>
+          <div><div class="label">Base</div><div class="value">${document.getElementById("selected-db-path-label")?.textContent || "Non specifiee"}</div></div>
+          <div><div class="label">Algorithme</div><div class="value">${currentDuplicatesAlgo}</div></div>
+          <div><div class="label">Total</div><div class="value" style="color: #e74c3c; font-weight: 700;">${filteredDuplicates.length}</div></div>
+        </div>
+        <div class="summary">${filteredDuplicates.length} doublon(s) - ${allColumns.length} attributs</div>
+        <table>
+          <thead>
+            <tr>
+              <th>Table</th>
+              <th>Type</th>
+              <th>ID</th>
+              ${allColumns.map((c) => `<th>${escapeHtml(c)}</th>`).join("")}
+            </tr>
+          </thead>
+          <tbody>
+    `;
+
+    filteredDuplicates.forEach((dup) => {
+      htmlContent += `<tr class="dup-row"><td>${escapeHtml(dup.tableName)}</td><td>DOUBLON</td><td>#${dup.row_index}</td>`;
+      allColumns.forEach((col) => {
+        const val = dup.data?.[col];
+        htmlContent += `<td>${escapeHtml(val === null || val === undefined ? "" : String(val))}</td>`;
+      });
+      htmlContent += `</tr>`;
+
+      htmlContent += `<tr class="ref-row"><td>${escapeHtml(dup.tableName)}</td><td>REFERENCE</td><td>#${dup.reference_id}</td>`;
+      allColumns.forEach((col) => {
+        const val = dup.reference_data?.[col];
+        htmlContent += `<td>${escapeHtml(val === null || val === undefined ? "" : String(val))}</td>`;
+      });
+      htmlContent += `</tr>`;
+    });
+
+    htmlContent += `
+          </tbody>
+        </table>
+        <div class="footer">Rapport genere par Data Manager - Expert Edition</div>
+      </body>
+      </html>
+    `;
+
+    showNotificationWithProgress("Generation du PDF...", 50, true);
+
+    const pdfResult = await window.pywebview.api.generate_pdf_from_html(
+      result.file_path,
+      htmlContent,
+    );
+
+    showNotificationWithProgress("PDF genere.", 100, true);
+
+    if (pdfResult && pdfResult.success) {
+      showNotification(`PDF exporte : ${result.file_path}`, true);
+      logUserAction(`Export des doublons vers PDF : ${result.file_path}`);
+    } else {
+      showNotification(
+        pdfResult?.message || "Erreur lors de la generation du PDF.",
+        false,
+      );
+    }
+  } catch (error) {
+    console.error("Erreur export PDF:", error);
+    showNotification("Erreur lors de l'export PDF.", false);
+  }
+}
+
+// ============================================
+// MANIPULATION DES DONNEES
+// ============================================
 async function initManipulatePage() {
   const tableSelect = document.querySelector("#manipulate-table-select");
   const btnSelectTable = document.querySelector("#btn-manipulate-select-table");
+  const btnRefreshManipulate = document.querySelector(
+    "#btn-refresh-manipulate",
+  );
+  const btnShowResults = document.querySelector("#btn-manipulate-show-results");
+  const btnAddRow = document.querySelector("#btn-manipulate-add-row");
+  const btnDeleteTable = document.querySelector("#btn-manipulate-delete-table");
   const resultsContainer = document.querySelector(
     "#manipulate-results-table-container",
   );
@@ -796,42 +2838,96 @@ async function initManipulatePage() {
   const btnManipulateDb = document.querySelector("#btn-manipulate-db");
   if (btnManipulateDb) {
     btnManipulateDb.onclick = async () => {
+      if (!isDbOpen) {
+        showNotification("Veuillez d'abord ouvrir une base de donnees.", false);
+        return;
+      }
       saveCurrentDbState();
       showView(manipulateView);
+      updateTerminateButtonVisibility();
       await loadManipulateTables();
       setTimeout(() => restoreDbState(), 100);
     };
   }
 
+  if (btnRefreshManipulate) {
+    btnRefreshManipulate.addEventListener("click", async () => {
+      await loadManipulateTables();
+      if (currentManipulateTable) {
+        await loadManipulateTableData(currentManipulateTable);
+      }
+      showNotification("Donnees actualisees.", true);
+    });
+  }
+
+  if (btnShowResults) {
+    btnShowResults.addEventListener("click", async () => {
+      if (!currentManipulateTable) {
+        showNotification("Veuillez d'abord selectionner une table.", false);
+        return;
+      }
+      await loadManipulateTableData(currentManipulateTable);
+      showNotification("Resultats affiches.", true);
+    });
+  }
+
+  if (btnAddRow) {
+    btnAddRow.addEventListener("click", async () => {
+      if (!currentManipulateTable) {
+        showNotification("Veuillez d'abord selectionner une table.", false);
+        return;
+      }
+
+      const activeDbPath = sessionStorage.getItem("current_db_path");
+      const struct =
+        await window.pywebview.api.get_database_structure_matrix(activeDbPath);
+      const columns = struct.structure[currentManipulateTable] || [];
+
+      const emptyRow = {};
+      columns.forEach((col) => {
+        if (col !== "id" && col !== "rowid") {
+          emptyRow[col] = "";
+        }
+      });
+
+      openEditModal(currentManipulateTable, null, emptyRow, true);
+    });
+  }
+
+  // ✅ Bouton Supprimer la table depuis la vue manipulation
+  if (btnDeleteTable) {
+    btnDeleteTable.addEventListener("click", () => {
+      if (!currentManipulateTable) {
+        showNotification(
+          "Veuillez d'abord selectionner une table a supprimer.",
+          false,
+        );
+        return;
+      }
+      deleteSelectedTable(currentManipulateTable);
+    });
+  }
+
   if (!tableSelect) return;
   await loadManipulateTables();
 
-  let currentSelectedTable = "";
-  let currentData = [];
-  let currentFilteredData = [];
-
-  // === VALIDER LA TABLE ===
   if (btnSelectTable) {
     btnSelectTable.onclick = async () => {
-      currentSelectedTable = tableSelect.value;
-      if (!currentSelectedTable) {
-        showNotification("Veuillez sélectionner une table.", false);
+      const selectedTable = tableSelect.value;
+      if (!selectedTable) {
+        showNotification("Veuillez selectionner une table.", false);
         return;
       }
-      showNotification(`Table ${currentSelectedTable} sélectionnée.`, true);
 
-      await loadTableDataFull(
-        currentSelectedTable,
-        resultsContainer,
-        countSpan,
-      );
-      const data = await getTableData(currentSelectedTable);
-      if (data) {
-        currentData = data;
-        currentFilteredData = data;
-      }
+      currentManipulateTable = selectedTable;
+      window._activeValueFilters = {};
+      window._activeColumnFilters = null;
 
-      searchInput.value = "";
+      showNotification(`Table ${selectedTable} selectionnee.`, true);
+
+      await loadManipulateTableData(selectedTable);
+
+      if (searchInput) searchInput.value = "";
       if (filtersArea) {
         filtersArea.classList.add("hidden");
         filtersArea.style.display = "none";
@@ -847,74 +2943,26 @@ async function initManipulatePage() {
     };
   }
 
-  async function getTableData(tableName) {
-    try {
-      const selectEl = document.getElementById("db-file-select");
-      const activeDbPath = selectEl ? selectEl.value : null;
-      const res = await window.pywebview.api.get_table_rows(
-        tableName,
-        activeDbPath,
-      );
-      if (res && res.success) {
-        return res.data;
-      }
-      return null;
-    } catch (err) {
-      console.error(err);
-      return null;
-    }
-  }
-
-  function displayData(dataArray, container, countSpan) {
-    if (!container) return;
-    if (!dataArray || dataArray.length === 0) {
-      container.innerHTML = "<p>Aucune donnée trouvée.</p>";
-      if (countSpan) countSpan.textContent = "0";
-      return;
-    }
-
-    if (countSpan) countSpan.textContent = dataArray.length;
-
-    const keys = Object.keys(dataArray[0]);
-    let html = `
-            <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem; background: var(--bg-container, #fff); color: var(--text-color, #000);">
-                <thead style="position: sticky; top: 0; background: var(--bg-secondary, #f1f5f9); z-index: 2;">
-                    <tr style="border-bottom: 2px solid #cbd5e1;">
-                        ${keys.map((k) => `<th style="padding: 10px; border-right: 1px solid #e2e8f0; text-align: left;">${escapeHtml(k)}</th>`).join("")}
-                    </tr>
-                </thead>
-                <tbody>
-        `;
-
-    dataArray.forEach((row) => {
-      html += `<tr style="border-bottom: 1px solid #e2e8f0;">`;
-      keys.forEach((k) => {
-        html += `<td style="padding: 8px 10px; border-right: 1px solid #e2e8f0;">${escapeHtml(row[k])}</td>`;
-      });
-      html += `</tr>`;
-    });
-
-    html += `</tbody></table>`;
-    container.innerHTML = html;
-  }
-
-  // === RECHERCHE ===
   if (btnExecuteSearch) {
     btnExecuteSearch.onclick = async () => {
       const val = searchInput?.value.trim();
-      if (!currentSelectedTable) {
-        showNotification("Veuillez d'abord sélectionner une table.", false);
+      if (!currentManipulateTable) {
+        showNotification("Veuillez d'abord selectionner une table.", false);
         return;
       }
 
       if (!val) {
-        displayData(currentData, resultsContainer, countSpan);
-        currentFilteredData = currentData;
+        displayManipulateData(
+          currentManipulateData,
+          resultsContainer,
+          countSpan,
+        );
+        currentManipulateFiltered = currentManipulateData;
         return;
       }
 
       try {
-        const filtered = currentData.filter((row) => {
+        const filtered = currentManipulateData.filter((row) => {
           return Object.values(row).some((value) =>
             String(value).toUpperCase().includes(val.toUpperCase()),
           );
@@ -922,15 +2970,15 @@ async function initManipulatePage() {
 
         if (filtered.length === 0) {
           showNotification(
-            "Aucun résultat trouvé pour cette recherche.",
+            "Aucun resultat trouve pour cette recherche.",
             false,
           );
         } else {
-          showNotification(`${filtered.length} résultat(s) trouvé(s).`, true);
+          showNotification(`${filtered.length} resultat(s) trouve(s).`, true);
         }
 
-        displayData(filtered, resultsContainer, countSpan);
-        currentFilteredData = filtered;
+        displayManipulateData(filtered, resultsContainer, countSpan);
+        currentManipulateFiltered = filtered;
       } catch (err) {
         console.error(err);
         showNotification("Erreur lors de la recherche.", false);
@@ -938,28 +2986,24 @@ async function initManipulatePage() {
     };
   }
 
-  // === BOUTON RECHERCHE (TOGGLE) ===
   const btnSearch = document.querySelector("#btn-manipulate-search");
   if (btnSearch) {
     btnSearch.onclick = function () {
-      if (!currentSelectedTable) {
-        showNotification("Veuillez d'abord sélectionner une table.", false);
+      if (!currentManipulateTable) {
+        showNotification("Veuillez d'abord selectionner une table.", false);
         return;
       }
 
-      // Toggle de la barre de recherche
       const isVisible =
         searchBarArea && !searchBarArea.classList.contains("hidden");
       if (isVisible) {
         searchBarArea.classList.add("hidden");
         searchBarArea.style.display = "none";
-        // Réinitialiser l'état du bouton
         this.style.background = "";
         this.style.color = "";
         return;
       }
 
-      // Cacher les autres zones
       if (filtersArea) {
         filtersArea.classList.add("hidden");
         filtersArea.style.display = "none";
@@ -969,27 +3013,25 @@ async function initManipulatePage() {
         operationsArea.style.display = "none";
       }
 
-      // Afficher la recherche
       searchBarArea.classList.remove("hidden");
       searchBarArea.style.display = "flex";
       searchInput.focus();
-
-      // Mettre en évidence le bouton
       this.style.background = "var(--primary, #4f46e5)";
       this.style.color = "white";
     };
   }
 
-  // === FILTRES (TOGGLE) ===
+  // ============================================
+  // FILTRER - 2 boutons : Filtrer les resultats + Filtrer les colonnes
+  // ============================================
   const btnFilters = document.querySelector("#btn-manipulate-filters");
   if (btnFilters) {
     btnFilters.onclick = async function () {
-      if (!currentSelectedTable) {
-        showNotification("Veuillez d'abord sélectionner une table.", false);
+      if (!currentManipulateTable) {
+        showNotification("Veuillez d'abord selectionner une table.", false);
         return;
       }
 
-      // Toggle des filtres
       const isVisible =
         filtersArea && !filtersArea.classList.contains("hidden");
       if (isVisible) {
@@ -1000,115 +3042,426 @@ async function initManipulatePage() {
         return;
       }
 
-      // Cacher les autres zones
       if (searchBarArea) {
         searchBarArea.classList.add("hidden");
         searchBarArea.style.display = "none";
-        const searchBtn = document.querySelector("#btn-manipulate-search");
-        if (searchBtn) {
-          searchBtn.style.background = "";
-          searchBtn.style.color = "";
-        }
       }
       if (operationsArea) {
         operationsArea.classList.add("hidden");
         operationsArea.style.display = "none";
-        const opBtn = document.querySelector("#btn-manipulate-operations");
-        if (opBtn) {
-          opBtn.style.background = "";
-          opBtn.style.color = "";
-        }
       }
 
       try {
-        const selectEl = document.getElementById("db-file-select");
-        const activeDbPath = selectEl ? selectEl.value : null;
+        const activeDbPath = sessionStorage.getItem("current_db_path");
         const struct =
           await window.pywebview.api.get_database_structure_matrix(
             activeDbPath,
           );
-        const columns = struct.structure[currentSelectedTable] || [];
+        const allColumns = struct.structure[currentManipulateTable] || [];
 
         if (filtersArea) {
           filtersArea.classList.remove("hidden");
           filtersArea.style.display = "block";
           filtersArea.innerHTML = `
-                        <h4 style="margin-bottom: 8px; color: var(--text-color); font-weight: bold;">
-                            <i class="fas fa-filter"></i> Filtrer les colonnes à afficher :
-                        </h4>
-                        <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center;" id="filter-checkboxes"></div>
-                        <div style="margin-top: 10px; display: flex; gap: 10px; flex-wrap: wrap;">
-                            <button id="btn-apply-filters" class="button button-primary" style="padding: 0.5rem 1.5rem;">
-                                <i class="fas fa-check"></i> Appliquer les filtres
-                            </button>
-                            <button id="btn-reset-filters" class="secondary-button" style="padding: 0.5rem 1.5rem;">
-                                <i class="fas fa-undo"></i> Réinitialiser
-                            </button>
-                            <button id="btn-close-filters" class="secondary-button" style="padding: 0.5rem 1.5rem; background: #6c757d; color: white;">
-                                <i class="fas fa-times"></i> Fermer
-                            </button>
-                        </div>
-                    `;
-          const boxContainer = filtersArea.querySelector("#filter-checkboxes");
+            <div style="margin-bottom: 1rem;">
+              <h4 style="margin-bottom: 12px; color: var(--text-color); font-weight: bold;">
+                <i class="fas fa-filter"></i> Filtrer
+              </h4>
+              <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1rem;">
+                Choisissez le type de filtre :
+              </p>
+              <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 1rem;">
+                <button id="btn-filter-results-mode" class="button button-primary" type="button" style="padding: 0.6rem 1.2rem;">
+                  <i class="fas fa-list-check"></i> Filtrer les resultats
+                </button>
+                <button id="btn-filter-columns-mode" class="secondary-button" type="button" style="padding: 0.6rem 1.2rem;">
+                  <i class="fas fa-columns"></i> Filtrer les colonnes
+                </button>
+              </div>
+            </div>
+            <div id="filter-content-container" style="border-top: 1px solid var(--border-color); padding-top: 1rem;"></div>
+            <div style="margin-top: 15px; display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end;">
+              <button id="btn-close-filters" class="secondary-button" style="padding: 0.5rem 1.5rem; background: #6c757d; color: white;">
+                <i class="fas fa-times"></i> Fermer
+              </button>
+            </div>
+          `;
 
-          columns.forEach((col) => {
-            const label = document.createElement("label");
-            label.style.cssText =
-              "display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; background: var(--bg-secondary, #e2e8f0); border-radius: 6px; cursor: pointer; font-weight: 600; color: var(--text-color, #111); border: 1px solid var(--border-color, #cbd5e1);";
-            label.innerHTML = `
-                            <input type="checkbox" class="col-filter-chk" value="${col}" checked style="width: 22px; height: 22px; cursor: pointer;" /> 
-                            <span>${escapeHtml(col)}</span>
+          const filterContentContainer = filtersArea.querySelector(
+            "#filter-content-container",
+          );
+          const btnFilterResultsMode = filtersArea.querySelector(
+            "#btn-filter-results-mode",
+          );
+          const btnFilterColumnsMode = filtersArea.querySelector(
+            "#btn-filter-columns-mode",
+          );
+
+          // Fonction : mode "Filtrer les resultats" (valeurs distinctes)
+          function renderFilterResultsMode() {
+            btnFilterResultsMode.className = "button button-primary";
+            btnFilterResultsMode.style.background = "var(--primary, #4f46e5)";
+            btnFilterResultsMode.style.color = "white";
+            btnFilterColumnsMode.className = "secondary-button";
+            btnFilterColumnsMode.style.background = "";
+            btnFilterColumnsMode.style.color = "";
+
+            const availableAttributes = FILTER_ATTRIBUTES.filter((attr) =>
+              allColumns.some(
+                (col) => col.toLowerCase() === attr.toLowerCase(),
+              ),
+            );
+
+            filterContentContainer.innerHTML = `
+              <div style="margin-bottom: 1rem;">
+                <h4 style="margin-bottom: 12px; color: var(--text-color); font-weight: bold;">
+                  <i class="fas fa-filter"></i> Filtrer par valeurs distinctes
+                </h4>
+                <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1rem;">
+                  Cliquez sur un attribut pour voir ses valeurs distinctes et cocher celles a afficher.
+                </p>
+                <div id="attribute-buttons-container" style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 1rem;"></div>
+              </div>
+              <div id="distinct-values-container" style="border-top: 1px solid var(--border-color); padding-top: 1rem; display: none;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 10px;">
+                  <h4 id="distinct-values-title" style="margin: 0; color: var(--text-color); font-weight: bold;"></h4>
+                  <div style="display: flex; gap: 8px;">
+                    <button id="btn-select-all-values" class="secondary-button" style="padding: 0.3rem 0.8rem; font-size: 0.8rem;">
+                      Tout cocher
+                    </button>
+                    <button id="btn-deselect-all-values" class="secondary-button" style="padding: 0.3rem 0.8rem; font-size: 0.8rem;">
+                      Tout decocher
+                    </button>
+                  </div>
+                </div>
+                <div id="distinct-values-checkboxes" style="display: flex; flex-direction: column; gap: 6px; max-height: 350px; overflow-y: auto; padding: 10px; background: var(--bg-secondary, #f8fafc); border-radius: 6px;"></div>
+              </div>
+              <div style="margin-top: 15px; display: flex; gap: 10px; flex-wrap: wrap;">
+                <button id="btn-apply-value-filters" class="button button-primary" style="padding: 0.5rem 1.5rem;">
+                  <i class="fas fa-check"></i> Appliquer les filtres
+                </button>
+                <button id="btn-reset-value-filters" class="secondary-button" style="padding: 0.5rem 1.5rem;">
+                  <i class="fas fa-undo"></i> Reinitialiser
+                </button>
+              </div>
+            `;
+
+            const attributeButtonsContainer =
+              filterContentContainer.querySelector(
+                "#attribute-buttons-container",
+              );
+            const distinctValuesContainer =
+              filterContentContainer.querySelector(
+                "#distinct-values-container",
+              );
+            const distinctValuesTitle = filterContentContainer.querySelector(
+              "#distinct-values-title",
+            );
+            const distinctValuesCheckboxes =
+              filterContentContainer.querySelector(
+                "#distinct-values-checkboxes",
+              );
+
+            if (availableAttributes.length === 0) {
+              attributeButtonsContainer.innerHTML =
+                '<span style="color: #999; font-style: italic;">Aucun attribut predefini trouve dans cette table</span>';
+            } else {
+              availableAttributes.forEach((attr) => {
+                const actualCol = allColumns.find(
+                  (col) => col.toLowerCase() === attr.toLowerCase(),
+                );
+                const btn = document.createElement("button");
+                btn.type = "button";
+                btn.className = "secondary-button attribute-filter-btn";
+                btn.dataset.column = actualCol;
+                btn.style.cssText =
+                  "padding: 8px 16px; border-radius: 6px; font-weight: 600; font-size: 0.85rem; border: 2px solid transparent; cursor: pointer; background: #fef3c7; color: #92400e;";
+                btn.innerHTML = `<i class="fas fa-tag"></i> ${escapeHtml(actualCol)}`;
+
+                btn.addEventListener("click", async () => {
+                  attributeButtonsContainer
+                    .querySelectorAll(".attribute-filter-btn")
+                    .forEach((b) => {
+                      b.style.borderColor = "transparent";
+                      b.style.background = "#fef3c7";
+                      b.style.color = "#92400e";
+                    });
+
+                  btn.style.borderColor = "#4f46e5";
+                  btn.style.background = "#e0e7ff";
+                  btn.style.color = "#4f46e5";
+
+                  distinctValuesContainer.style.display = "block";
+                  distinctValuesTitle.innerHTML = `<i class="fas fa-list"></i> Valeurs distinctes de "${escapeHtml(actualCol)}"`;
+                  distinctValuesCheckboxes.innerHTML =
+                    '<p style="color: var(--text-muted);">Chargement des valeurs...</p>';
+
+                  try {
+                    const result =
+                      await window.pywebview.api.get_distinct_values(
+                        currentManipulateTable,
+                        actualCol,
+                        activeDbPath,
+                      );
+
+                    if (result?.success && result.values.length > 0) {
+                      const activeValues =
+                        window._activeValueFilters[actualCol] || null;
+
+                      distinctValuesCheckboxes.innerHTML = "";
+
+                      result.values.forEach((val) => {
+                        const valStr = String(val);
+                        const isChecked = activeValues
+                          ? activeValues.includes(valStr)
+                          : true;
+
+                        const label = document.createElement("label");
+                        label.style.cssText =
+                          "display: flex; align-items: center; gap: 10px; padding: 6px 10px; background: #ffffff; border-radius: 4px; cursor: pointer; border: 1px solid #e2e8f0; font-size: 0.85rem;";
+                        label.innerHTML = `
+                          <input type="checkbox" class="distinct-value-chk" data-column="${escapeHtml(actualCol)}" value="${escapeHtml(valStr)}" ${isChecked ? "checked" : ""} style="width: 18px; height: 18px; cursor: pointer; accent-color: #4f46e5;" />
+                          <span style="flex: 1;">${escapeHtml(valStr)}</span>
                         `;
-            boxContainer.appendChild(label);
-          });
+                        distinctValuesCheckboxes.appendChild(label);
+                      });
 
-          // Appliquer les filtres
-          const applyBtn = filtersArea.querySelector("#btn-apply-filters");
-          applyBtn.onclick = () => {
-            const activeCols = Array.from(
-              filtersArea.querySelectorAll(".col-filter-chk:checked"),
-            ).map((c) => c.value);
+                      showNotification(
+                        `${result.values.length} valeur(s) trouvee(s)`,
+                        true,
+                      );
+                    } else {
+                      distinctValuesCheckboxes.innerHTML =
+                        '<p style="color: #999; font-style: italic;">Aucune valeur trouvee pour cette colonne.</p>';
+                    }
+                  } catch (err) {
+                    console.error(err);
+                    distinctValuesCheckboxes.innerHTML =
+                      '<p style="color: red;">Erreur lors du chargement.</p>';
+                  }
+                });
 
-            if (activeCols.length === 0) {
-              showNotification("Sélectionnez au moins une colonne.", false);
-              return;
+                attributeButtonsContainer.appendChild(btn);
+              });
             }
 
-            const filteredData = currentFilteredData.map((row) => {
-              const newRow = {};
-              activeCols.forEach((col) => {
-                newRow[col] = row[col];
+            filterContentContainer.querySelector(
+              "#btn-select-all-values",
+            ).onclick = () => {
+              distinctValuesCheckboxes
+                .querySelectorAll(".distinct-value-chk")
+                .forEach((chk) => {
+                  chk.checked = true;
+                });
+            };
+
+            filterContentContainer.querySelector(
+              "#btn-deselect-all-values",
+            ).onclick = () => {
+              distinctValuesCheckboxes
+                .querySelectorAll(".distinct-value-chk")
+                .forEach((chk) => {
+                  chk.checked = false;
+                });
+            };
+
+            filterContentContainer.querySelector(
+              "#btn-apply-value-filters",
+            ).onclick = () => {
+              const newFilters = {};
+              distinctValuesCheckboxes
+                .querySelectorAll(".distinct-value-chk")
+                .forEach((chk) => {
+                  const col = chk.getAttribute("data-column");
+                  if (chk.checked) {
+                    if (!newFilters[col]) newFilters[col] = [];
+                    newFilters[col].push(chk.value);
+                  }
+                });
+
+              window._activeValueFilters = newFilters;
+              applyValueFilters();
+
+              const filterCount = Object.keys(newFilters).length;
+              if (filterCount === 0) {
+                showNotification(
+                  "Aucun filtre actif. Toutes les donnees sont affichees.",
+                  true,
+                );
+              } else {
+                showNotification(
+                  `Filtres appliques sur ${filterCount} colonne(s).`,
+                  true,
+                );
+              }
+            };
+
+            filterContentContainer.querySelector(
+              "#btn-reset-value-filters",
+            ).onclick = () => {
+              window._activeValueFilters = {};
+              distinctValuesCheckboxes
+                .querySelectorAll(".distinct-value-chk")
+                .forEach((chk) => {
+                  chk.checked = true;
+                });
+              displayManipulateData(
+                currentManipulateData,
+                resultsContainer,
+                countSpan,
+              );
+              showNotification("Filtres reinitialises.", true);
+            };
+          }
+
+          // Fonction : mode "Filtrer les colonnes"
+          function renderFilterColumnsMode() {
+            btnFilterColumnsMode.className = "button button-primary";
+            btnFilterColumnsMode.style.background = "var(--primary, #4f46e5)";
+            btnFilterColumnsMode.style.color = "white";
+            btnFilterResultsMode.className = "secondary-button";
+            btnFilterResultsMode.style.background = "";
+            btnFilterResultsMode.style.color = "";
+
+            const activeCols =
+              window._activeColumnFilters || allColumns.slice();
+
+            filterContentContainer.innerHTML = `
+              <div style="margin-bottom: 1rem;">
+                <h4 style="margin-bottom: 12px; color: var(--text-color); font-weight: bold;">
+                  <i class="fas fa-columns"></i> Filtrer les colonnes a afficher
+                </h4>
+                <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1rem;">
+                  Cochez les colonnes que vous souhaitez afficher dans les resultats.
+                </p>
+                <div style="margin-bottom: 12px; display: flex; gap: 8px; flex-wrap: wrap;">
+                  <button id="btn-select-all-cols" class="secondary-button" style="padding: 0.3rem 0.8rem; font-size: 0.8rem;">
+                    Tout cocher
+                  </button>
+                  <button id="btn-deselect-all-cols" class="secondary-button" style="padding: 0.3rem 0.8rem; font-size: 0.8rem;">
+                    Tout decocher
+                  </button>
+                </div>
+                <div id="columns-checkboxes-container" style="display: flex; gap: 8px; flex-wrap: wrap;"></div>
+              </div>
+              <div style="margin-top: 15px; display: flex; gap: 10px; flex-wrap: wrap;">
+                <button id="btn-apply-column-filters" class="button button-primary" style="padding: 0.5rem 1.5rem;">
+                  <i class="fas fa-check"></i> Appliquer
+                </button>
+                <button id="btn-reset-column-filters" class="secondary-button" style="padding: 0.5rem 1.5rem;">
+                  <i class="fas fa-undo"></i> Reinitialiser
+                </button>
+              </div>
+            `;
+
+            const columnsCheckboxesContainer =
+              filterContentContainer.querySelector(
+                "#columns-checkboxes-container",
+              );
+
+            allColumns.forEach((col) => {
+              const isChecked = activeCols.includes(col);
+              const label = document.createElement("label");
+              label.style.cssText =
+                "display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; background: var(--bg-secondary, #e2e8f0); border-radius: 6px; cursor: pointer; font-weight: 600; color: var(--text-color, #111); border: 1px solid var(--border-color, #cbd5e1); font-size: 0.85rem;";
+              label.innerHTML = `
+                <input type="checkbox" class="column-filter-chk" value="${escapeHtml(col)}" ${isChecked ? "checked" : ""} style="width: 18px; height: 18px; cursor: pointer;" />
+                <span>${escapeHtml(col)}</span>
+              `;
+              columnsCheckboxesContainer.appendChild(label);
+            });
+
+            filterContentContainer.querySelector(
+              "#btn-select-all-cols",
+            ).onclick = () => {
+              columnsCheckboxesContainer
+                .querySelectorAll(".column-filter-chk")
+                .forEach((chk) => {
+                  chk.checked = true;
+                });
+            };
+
+            filterContentContainer.querySelector(
+              "#btn-deselect-all-cols",
+            ).onclick = () => {
+              columnsCheckboxesContainer
+                .querySelectorAll(".column-filter-chk")
+                .forEach((chk) => {
+                  chk.checked = false;
+                });
+            };
+
+            filterContentContainer.querySelector(
+              "#btn-apply-column-filters",
+            ).onclick = () => {
+              const selectedCols = Array.from(
+                columnsCheckboxesContainer.querySelectorAll(
+                  ".column-filter-chk:checked",
+                ),
+              ).map((chk) => chk.value);
+
+              if (selectedCols.length === 0) {
+                showNotification(
+                  "Selectionnez au moins une colonne a afficher.",
+                  false,
+                );
+                return;
+              }
+
+              window._activeColumnFilters = selectedCols;
+
+              const filteredData = currentManipulateFiltered.map((row) => {
+                const newRow = {};
+                selectedCols.forEach((col) => {
+                  newRow[col] = row[col];
+                });
+                return newRow;
               });
-              return newRow;
-            });
 
-            displayData(filteredData, resultsContainer, countSpan);
-            showNotification(
-              `Affichage de ${activeCols.length} colonne(s).`,
-              true,
-            );
+              displayManipulateData(filteredData, resultsContainer, countSpan);
+              showNotification(
+                `Affichage de ${selectedCols.length} colonne(s).`,
+                true,
+              );
+            };
+
+            filterContentContainer.querySelector(
+              "#btn-reset-column-filters",
+            ).onclick = () => {
+              window._activeColumnFilters = null;
+              columnsCheckboxesContainer
+                .querySelectorAll(".column-filter-chk")
+                .forEach((chk) => {
+                  chk.checked = true;
+                });
+              displayManipulateData(
+                currentManipulateFiltered,
+                resultsContainer,
+                countSpan,
+              );
+              showNotification("Toutes les colonnes sont affichees.", true);
+            };
+          }
+
+          // Boutons de bascule entre les modes
+          btnFilterResultsMode.onclick = () => {
+            renderFilterResultsMode();
           };
 
-          // Réinitialiser les filtres
-          const resetBtn = filtersArea.querySelector("#btn-reset-filters");
-          resetBtn.onclick = () => {
-            filtersArea.querySelectorAll(".col-filter-chk").forEach((chk) => {
-              chk.checked = true;
-            });
-            displayData(currentFilteredData, resultsContainer, countSpan);
-            showNotification("Filtres réinitialisés.", true);
+          btnFilterColumnsMode.onclick = () => {
+            renderFilterColumnsMode();
           };
 
-          // Bouton Fermer
-          const closeBtn = filtersArea.querySelector("#btn-close-filters");
-          closeBtn.onclick = () => {
+          // Afficher par defaut le mode "Filtrer les resultats"
+          renderFilterResultsMode();
+
+          filtersArea.querySelector("#btn-close-filters").onclick = () => {
             filtersArea.classList.add("hidden");
             filtersArea.style.display = "none";
             btnFilters.style.background = "";
             btnFilters.style.color = "";
           };
 
-          // Mettre en évidence le bouton
           this.style.background = "var(--primary, #4f46e5)";
           this.style.color = "white";
         }
@@ -1119,16 +3472,46 @@ async function initManipulatePage() {
     };
   }
 
-  // === OPÉRATIONS SQL (TOGGLE) ===
+  // Fonction : appliquer les filtres par valeur
+  function applyValueFilters() {
+    if (!currentManipulateData || currentManipulateData.length === 0) return;
+
+    const filters = window._activeValueFilters || {};
+    const filterKeys = Object.keys(filters);
+
+    if (filterKeys.length === 0) {
+      currentManipulateFiltered = currentManipulateData;
+      displayManipulateData(currentManipulateData, resultsContainer, countSpan);
+      return;
+    }
+
+    const filtered = currentManipulateData.filter((row) => {
+      return filterKeys.every((col) => {
+        const allowedValues = filters[col];
+        const rowValue = String(row[col] ?? "");
+        return allowedValues.includes(rowValue);
+      });
+    });
+
+    currentManipulateFiltered = filtered;
+    displayManipulateData(filtered, resultsContainer, countSpan);
+
+    if (filtered.length === 0) {
+      showNotification(
+        "Aucun resultat ne correspond aux filtres selectionnes.",
+        false,
+      );
+    }
+  }
+
   const btnOperations = document.querySelector("#btn-manipulate-operations");
   if (btnOperations) {
-    btnOperations.onclick = async function () {
-      if (!currentSelectedTable) {
-        showNotification("Veuillez d'abord sélectionner une table.", false);
+    btnOperations.addEventListener("click", async function () {
+      if (!currentManipulateTable) {
+        showNotification("Veuillez d'abord selectionner une table.", false);
         return;
       }
 
-      // Toggle des opérations
       const isVisible =
         operationsArea && !operationsArea.classList.contains("hidden");
       if (isVisible) {
@@ -1139,48 +3522,28 @@ async function initManipulatePage() {
         return;
       }
 
-      // Cacher les autres zones
       if (searchBarArea) {
         searchBarArea.classList.add("hidden");
         searchBarArea.style.display = "none";
-        const searchBtn = document.querySelector("#btn-manipulate-search");
-        if (searchBtn) {
-          searchBtn.style.background = "";
-          searchBtn.style.color = "";
-        }
       }
       if (filtersArea) {
         filtersArea.classList.add("hidden");
         filtersArea.style.display = "none";
-        const filterBtn = document.querySelector("#btn-manipulate-filters");
-        if (filterBtn) {
-          filterBtn.style.background = "";
-          filterBtn.style.color = "";
-        }
       }
 
-      // Afficher les opérations
       operationsArea.classList.remove("hidden");
       operationsArea.style.display = "flex";
-      await initAdvancedQuerySelects(currentSelectedTable);
-
-      // Mettre en évidence le bouton
+      await initAdvancedQuerySelects(currentManipulateTable);
       this.style.background = "var(--primary, #4f46e5)";
       this.style.color = "white";
-
-      // Faire défiler jusqu'aux opérations
-      setTimeout(() => {
-        operationsArea.scrollIntoView({ behavior: "smooth", block: "center" });
-      }, 100);
-    };
+    });
   }
 
-  // === EXÉCUTION DES OPÉRATIONS SQL ===
   const btnExecuteOp = document.getElementById("btn-execute-operation");
   if (btnExecuteOp) {
     btnExecuteOp.addEventListener("click", async () => {
-      if (!currentSelectedTable) {
-        showNotification("Veuillez d'abord sélectionner une table.", false);
+      if (!currentManipulateTable) {
+        showNotification("Veuillez d'abord selectionner une table.", false);
         return;
       }
 
@@ -1205,17 +3568,16 @@ async function initManipulatePage() {
 
       try {
         await waitForApi();
-        const selectEl = document.getElementById("db-file-select");
-        const activeDbPath = selectEl ? selectEl.value : null;
+        const activeDbPath = sessionStorage.getItem("current_db_path");
 
         showNotificationWithProgress(
-          `Exécution de "${opNames[opType] || opType}"...`,
+          `Execution de "${opNames[opType] || opType}"...`,
           30,
           true,
         );
 
         const res = await window.pywebview.api.execute_custom_sql_operation(
-          currentSelectedTable,
+          currentManipulateTable,
           opType,
           attribute,
           value,
@@ -1223,21 +3585,20 @@ async function initManipulatePage() {
           activeDbPath,
         );
 
-        showNotificationWithProgress("Opération terminée", 100, true);
+        showNotificationWithProgress("Operation terminee", 100, true);
 
         if (res?.success) {
-          currentData = res.data;
-          currentFilteredData = res.data;
-
-          displayData(res.data, resultsContainer, countSpan);
+          currentManipulateData = res.data;
+          currentManipulateFiltered = res.data;
+          displayManipulateData(res.data, resultsContainer, countSpan);
           showNotification(
-            `${opNames[opType] || opType} exécutée : ${res.data.length} résultat(s).`,
+            `${opNames[opType] || opType} executee : ${res.data.length} resultat(s).`,
             true,
           );
-          logUserAction(`Exécution de ${opType} sur ${currentSelectedTable}`);
+          logUserAction(`Execution de ${opType} sur ${currentManipulateTable}`);
         } else {
           showNotification(
-            res?.message || "Erreur lors de l'exécution.",
+            res?.message || "Erreur lors de l'execution.",
             false,
           );
         }
@@ -1248,7 +3609,6 @@ async function initManipulatePage() {
     });
   }
 
-  // === RESET DES OPÉRATIONS ===
   const btnResetOp = document.getElementById("btn-reset-operation");
   if (btnResetOp) {
     btnResetOp.addEventListener("click", () => {
@@ -1269,13 +3629,154 @@ async function initManipulatePage() {
         firstOpBtn.style.color = "#ffffff";
       }
 
-      if (currentSelectedTable) {
-        loadTableDataFull(currentSelectedTable, resultsContainer, countSpan);
+      if (currentManipulateTable) {
+        loadManipulateTableData(currentManipulateTable);
       }
 
-      showNotification("Formulaire réinitialisé.", true);
+      showNotification("Formulaire reinitialise.", true);
     });
   }
+}
+
+async function loadManipulateTableData(tableName) {
+  const container = document.querySelector(
+    "#manipulate-results-table-container",
+  );
+  const countSpan = document.querySelector("#manipulate-response-count");
+
+  if (!container) return;
+
+  try {
+    const activeDbPath = sessionStorage.getItem("current_db_path");
+    const res = await window.pywebview.api.get_table_rows(
+      tableName,
+      activeDbPath,
+    );
+
+    if (res && res.success) {
+      currentManipulateData = res.data;
+      currentManipulateFiltered = res.data;
+
+      if (
+        window._activeValueFilters &&
+        Object.keys(window._activeValueFilters).length > 0
+      ) {
+        const filters = window._activeValueFilters;
+        const filterKeys = Object.keys(filters);
+
+        const filtered = currentManipulateData.filter((row) => {
+          return filterKeys.every((col) => {
+            const allowedValues = filters[col];
+            const rowValue = String(row[col] ?? "");
+            return allowedValues.includes(rowValue);
+          });
+        });
+
+        currentManipulateFiltered = filtered;
+        displayManipulateData(filtered, container, countSpan);
+      } else {
+        displayManipulateData(res.data, container, countSpan);
+      }
+    } else {
+      container.innerHTML = "<p>Aucune donnee trouvee.</p>";
+    }
+  } catch (err) {
+    console.error(err);
+    container.innerHTML = "<p>Erreur lors du chargement.</p>";
+  }
+}
+
+function displayManipulateData(dataArray, container, countSpan) {
+  if (!container) return;
+  if (!dataArray || dataArray.length === 0) {
+    container.innerHTML = "<p>Aucune donnee trouvee.</p>";
+    if (countSpan) countSpan.textContent = "0";
+    return;
+  }
+
+  if (countSpan) countSpan.textContent = dataArray.length;
+
+  const keys = Object.keys(dataArray[0]);
+  let html = `
+    <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem; background: var(--bg-container, #fff); color: var(--text-color, #000);">
+      <thead style="position: sticky; top: 0; background: var(--bg-secondary, #f1f5f9); z-index: 2;">
+        <tr style="border-bottom: 2px solid #cbd5e1;">
+          <th style="padding: 10px; border-right: 1px solid #e2e8f0; text-align: center; width: 100px;">Actions</th>
+          ${keys.map((k) => `<th style="padding: 10px; border-right: 1px solid #e2e8f0; text-align: left;">${escapeHtml(k)}</th>`).join("")}
+        </tr>
+      </thead>
+      <tbody>
+  `;
+
+  dataArray.forEach((row, idx) => {
+    html += `<tr style="border-bottom: 1px solid #e2e8f0;">`;
+
+    const rowId = row.rowid || row.id || idx + 1;
+
+    html += `
+      <td style="padding: 8px 10px; border-right: 1px solid #e2e8f0; text-align: center; white-space: nowrap;">
+        <button class="btn-manipulate-edit" data-rowid="${rowId}" title="Modifier" style="background: #f39c12; color: white; border: none; padding: 3px 6px; border-radius: 3px; cursor: pointer; font-size: 0.7rem; margin-right: 3px;">
+          <i class="fas fa-edit"></i>
+        </button>
+        <button class="btn-manipulate-delete" data-rowid="${rowId}" title="Supprimer" style="background: #dc3545; color: white; border: none; padding: 3px 6px; border-radius: 3px; cursor: pointer; font-size: 0.7rem;">
+          <i class="fas fa-trash"></i>
+        </button>
+      </td>
+    `;
+
+    keys.forEach((k) => {
+      html += `<td style="padding: 8px 10px; border-right: 1px solid #e2e8f0;">${escapeHtml(row[k])}</td>`;
+    });
+    html += `</tr>`;
+  });
+
+  html += `</tbody></table>`;
+  container.innerHTML = html;
+
+  container.querySelectorAll(".btn-manipulate-edit").forEach((btn) => {
+    btn.addEventListener("click", function () {
+      const rowId = parseInt(this.getAttribute("data-rowid"));
+      const row = currentManipulateData.find(
+        (r, i) => (r.rowid || r.id || i + 1) === rowId,
+      );
+      if (row) {
+        openEditModal(currentManipulateTable, rowId, row, false);
+      }
+    });
+  });
+
+  container.querySelectorAll(".btn-manipulate-delete").forEach((btn) => {
+    btn.addEventListener("click", async function () {
+      const rowId = parseInt(this.getAttribute("data-rowid"));
+
+      if (!confirm(`Supprimer la ligne #${rowId} ?`)) return;
+
+      try {
+        const activeDbPath = sessionStorage.getItem("current_db_path");
+        const res = await window.pywebview.api.delete_table_row(
+          currentManipulateTable,
+          rowId,
+          activeDbPath,
+        );
+
+        if (res && res.success) {
+          showNotification("Ligne supprimee avec succes.", true);
+          logUserAction(
+            `Suppression de la ligne #${rowId} dans ${currentManipulateTable}`,
+          );
+          await loadManipulateTableData(currentManipulateTable);
+        } else {
+          showNotification(
+            res?.message || "Erreur lors de la suppression.",
+            false,
+          );
+        }
+      } catch (err) {
+        console.error(err);
+        showNotification("Erreur lors de la suppression.", false);
+      }
+    });
+  });
 }
 
 async function loadManipulateTables() {
@@ -1294,7 +3795,8 @@ async function loadManipulateTables() {
       await window.pywebview.api.get_database_table_names(activeDbPath);
 
     if (tablesRes && tablesRes.success) {
-      tableSelect.innerHTML = '<option value="">-- Choose a table --</option>';
+      tableSelect.innerHTML =
+        '<option value="">-- Choisir une table --</option>';
       tablesRes.tables.forEach((t) => {
         const opt = document.createElement("option");
         opt.value = t;
@@ -1303,7 +3805,7 @@ async function loadManipulateTables() {
       });
     }
   } catch (e) {
-    console.error("Error loading manipulation tables", e);
+    console.error("Erreur lors du chargement des tables", e);
   }
 }
 
@@ -1323,7 +3825,8 @@ async function initAdvancedQuerySelects(tableName) {
     const columns = structRes.structure[tableName] || [];
 
     if (attrSelect) {
-      attrSelect.innerHTML = '<option value="">-- All columns (*) --</option>';
+      attrSelect.innerHTML =
+        '<option value="">-- Toutes les colonnes (*) --</option>';
       columns.forEach((col) => {
         const opt = document.createElement("option");
         opt.value = col;
@@ -1333,7 +3836,7 @@ async function initAdvancedQuerySelects(tableName) {
     }
 
     if (groupSelect) {
-      groupSelect.innerHTML = '<option value="">-- None --</option>';
+      groupSelect.innerHTML = '<option value="">-- Aucun --</option>';
       columns.forEach((col) => {
         const opt = document.createElement("option");
         opt.value = col;
@@ -1342,697 +3845,46 @@ async function initAdvancedQuerySelects(tableName) {
       });
     }
   } catch (err) {
-    console.error("Error loading attributes:", err);
+    console.error("Erreur lors du chargement des attributs:", err);
   }
 }
 
-async function loadTableDataFull(tableName, container, countSpan) {
-  const selectEl = document.getElementById("db-file-select");
-  const activeDbPath = selectEl ? selectEl.value : null;
-  const res = await window.pywebview.api.get_table_rows(
-    tableName,
-    activeDbPath,
-  );
-  if (res && res.success) {
-    displayData(res.data, container, countSpan);
-  }
-}
-
-function displayData(dataArray, container, countSpan) {
-  if (!container) return;
-  if (!dataArray || dataArray.length === 0) {
-    container.innerHTML = "<p>No data found.</p>";
-    if (countSpan) countSpan.textContent = "0";
-    return;
-  }
-
-  if (countSpan) countSpan.textContent = dataArray.length;
-
-  const keys = Object.keys(dataArray[0]);
-  let html = `
-        <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem; background: var(--bg-container, #fff); color: var(--text-color, #000);">
-            <thead style="position: sticky; top: 0; background: var(--bg-secondary, #f1f5f9); z-index: 2;">
-                <tr style="border-bottom: 2px solid #cbd5e1;">
-                    ${keys.map((k) => `<th style="padding: 10px; border-right: 1px solid #e2e8f0; text-align: left;">${escapeHtml(k)}</th>`).join("")}
-                </tr>
-            </thead>
-            <tbody>
-    `;
-
-  dataArray.forEach((row) => {
-    html += `<tr style="border-bottom: 1px solid #e2e8f0;">`;
-    keys.forEach((k) => {
-      html += `<td style="padding: 8px 10px; border-right: 1px solid #e2e8f0;">${escapeHtml(row[k])}</td>`;
-    });
-    html += `</tr>`;
-  });
-
-  html += `</tbody></table>`;
-  container.innerHTML = html;
-}
-
-// === EXPORT PDF DES DOUBLONS ===
-async function exportDuplicatesToPDF() {
-  try {
-    const resultsContent = document.querySelector("#db-results-content");
-    if (
-      !resultsContent ||
-      !resultsContent.innerHTML.trim() ||
-      resultsContent.innerHTML.includes("No duplicates")
-    ) {
-      showNotification("No duplicate results to export.", false);
-      return;
-    }
-
-    const table = resultsContent.querySelector("table");
-    if (!table) {
-      showNotification("No data table to export.", false);
-      return;
-    }
-
-    const result = await window.pywebview.api.select_pdf_file();
-    if (!result || !result.success) {
-      if (result?.message !== "No file selected.") {
-        showNotification(result?.message || "Error selecting file.", false);
-      }
-      return;
-    }
-
-    let filePath = result.file_path;
-    if (filePath.startsWith("('") || filePath.startsWith('("')) {
-      try {
-        const parsed = JSON.parse(filePath.replace(/'/g, '"'));
-        if (Array.isArray(parsed)) {
-          filePath = parsed[0];
-        }
-      } catch {
-        filePath = filePath
-          .replace(/^\(\'/, "")
-          .replace(/\'\)$/, "")
-          .replace(/^\("/, "")
-          .replace(/"\)$/, "");
-      }
-    }
-
-    let htmlContent = `
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <meta charset="UTF-8">
-                <title>Duplicates Report</title>
-                <style>
-                    body { font-family: Arial, sans-serif; padding: 40px; color: #333; }
-                    h1 { color: #4f46e5; border-bottom: 3px solid #4f46e5; padding-bottom: 10px; }
-                    table { width: 100%; border-collapse: collapse; margin: 20px 0; font-size: 12px; }
-                    th { background: #4f46e5; color: white; padding: 10px; text-align: left; }
-                    td { padding: 8px 10px; border-bottom: 1px solid #ddd; }
-                    tr:nth-child(even) { background: #f8fafc; }
-                    .header-info { margin-bottom: 20px; color: #666; }
-                    .footer { margin-top: 40px; color: #999; font-size: 11px; border-top: 1px solid #eee; padding-top: 20px; }
-                </style>
-            </head>
-            <body>
-                <h1>Duplicates Report</h1>
-                <div class="header-info">
-                    <p><strong>Date :</strong> ${new Date().toLocaleString()}</p>
-                    <p><strong>Database :</strong> ${document.getElementById("selected-db-path-label")?.textContent || "Not specified"}</p>
-                    <p><strong>Algorithm :</strong> ${document.querySelector("#dup-scan-status")?.textContent?.includes("CIN") ? "CIN + NOM" : "General"}</p>
-                    <p><strong>Total duplicates :</strong> ${table.querySelectorAll("tbody tr").length}</p>
-                </div>
-        `;
-
-    const tableClone = table.cloneNode(true);
-
-    const headerRow = tableClone.querySelector("thead tr");
-    if (headerRow) {
-      const firstTh = headerRow.querySelector("th");
-      if (
-        firstTh &&
-        (firstTh.textContent.trim() === "🗑️" ||
-          firstTh.textContent.trim() === "Suppr.")
-      ) {
-        firstTh.remove();
-      }
-    }
-
-    tableClone.querySelectorAll("tbody tr").forEach((row) => {
-      const firstTd = row.querySelector("td");
-      if (firstTd && firstTd.querySelector('input[type="checkbox"]')) {
-        firstTd.remove();
-      }
-    });
-
-    htmlContent += tableClone.outerHTML;
-    htmlContent += `
-                <div class="footer">
-                    Report generated automatically by Data Manager - Expert Edition
-                </div>
-            </body>
-            </html>
-        `;
-
-    showNotificationWithProgress("Generating PDF...", 50, true);
-    const pdfResult = await window.pywebview.api.generate_pdf_from_html(
-      filePath,
-      htmlContent,
-    );
-    showNotificationWithProgress("PDF generated successfully !", 100, true);
-
-    if (pdfResult && pdfResult.success) {
-      showNotification(`PDF saved : ${filePath}`, true);
-      logUserAction(`Export PDF of duplicates : ${filePath}`);
-    } else {
-      showNotification(pdfResult?.message || "Error generating PDF.", false);
-    }
-  } catch (error) {
-    console.error("Error exporting PDF:", error);
-    showNotification("Error exporting PDF.", false);
-  }
-}
-
-// === DOUBLONS - ACTIONS ADMIN ===
-function initAdminActions() {
-  const btnCheckDups = document.querySelector("#btn-check-duplicates");
-  const btnCancelDups = document.querySelector("#btn-cancel-dups");
-  const btnSelectAll = document.querySelector("#btn-select-all-dups");
-  const btnDeleteDups = document.querySelector("#btn-delete-selected-dups");
-  const btnSaveDups = document.querySelector("#btn-save-dups");
-  const btnExpandDups = document.querySelector("#btn-expand-dups");
-  const btnExpandManipulate = document.querySelector("#btn-expand-manipulate");
-  const btnClean = document.querySelector("#btn-clean-db");
-  const btnExport = document.querySelector("#btn-export-excel");
-  const btnExportPDF = document.querySelector("#btn-export-dups-pdf");
-
-  if (btnExportPDF) {
-    btnExportPDF.addEventListener("click", exportDuplicatesToPDF);
-  }
-
-  // === SCAN DOUBLONS AVEC ALGORITHMES ===
-  if (btnCheckDups) {
-    btnCheckDups.addEventListener("click", async () => {
-      const container = document.querySelector("#db-results-container");
-      const content = document.querySelector("#db-results-content");
-      const toolbar = document.querySelector("#duplicate-actions-toolbar");
-
-      container.classList.remove("hidden");
-      toolbar.classList.remove("hidden");
-      if (btnExpandDups) btnExpandDups.classList.remove("hidden");
-
-      content.innerHTML = `
-                <div class="dup-algorithm-selector">
-                    <label class="active">
-                        <input type="radio" name="dup-algorithm" value="general" checked />
-                        General (all columns)
-                    </label>
-                    <label>
-                        <input type="radio" name="dup-algorithm" value="cin_nom" />
-                        CIN + NOM (similarity search)
-                    </label>
-                    <button id="btn-run-dup-scan" class="button button-primary" style="margin-left: auto; padding: 0.4rem 1.2rem;">
-                        <i class="fas fa-play"></i> Run analysis
-                    </button>
-                </div>
-                <div id="dup-scan-status" style="padding: 0.5rem; color: var(--text-muted, #64748b);">Select an algorithm and click "Run analysis"</div>
-                <div id="dup-results-body"></div>
-            `;
-
-      const radioButtons = content.querySelectorAll(
-        'input[name="dup-algorithm"]',
-      );
-      const labels = content.querySelectorAll(".dup-algorithm-selector label");
-
-      radioButtons.forEach((radio, index) => {
-        radio.addEventListener("change", () => {
-          labels.forEach((l, i) => {
-            l.style.borderColor =
-              i === index ? "var(--primary, #4f46e5)" : "transparent";
-            l.style.background =
-              i === index ? "rgba(79, 70, 229, 0.08)" : "transparent";
-          });
-        });
-      });
-
-      const runBtn = content.querySelector("#btn-run-dup-scan");
-      runBtn.addEventListener("click", async function () {
-        const selectedAlgo =
-          content.querySelector('input[name="dup-algorithm"]:checked')?.value ||
-          "general";
-        const resultsBody = content.querySelector("#dup-results-body");
-        const statusDiv = content.querySelector("#dup-scan-status");
-
-        resultsBody.innerHTML =
-          '<p style="color: var(--text-muted, #64748b);">Analysis in progress...</p>';
-        statusDiv.textContent = `Analysis with "${selectedAlgo === "general" ? "General" : "CIN + NOM"}" algorithm...`;
-        duplicateScanCancelled = false;
-
-        try {
-          await waitForApi();
-          const selectEl = document.getElementById("db-file-select");
-          const activeDbPath = selectEl ? selectEl.value : null;
-
-          const tablesRes =
-            await window.pywebview.api.get_database_table_names(activeDbPath);
-          if (
-            !tablesRes ||
-            !tablesRes.success ||
-            tablesRes.tables.length === 0
-          ) {
-            resultsBody.innerHTML = "<p>No tables found in this database.</p>";
-            return;
-          }
-
-          const tables = tablesRes.tables;
-          let allDuplicates = [];
-
-          for (let i = 0; i < tables.length; i++) {
-            if (duplicateScanCancelled) break;
-            const currentTable = tables[i];
-            const pct = Math.round(((i + 1) / tables.length) * 100);
-
-            showNotificationWithProgress(
-              `Analyzing duplicates (${selectedAlgo === "general" ? "General" : "CIN+NOM"}) : ${currentTable} (${i + 1}/${tables.length})`,
-              pct,
-              true,
-            );
-
-            const scanRes =
-              await window.pywebview.api.scan_table_duplicates_advanced(
-                currentTable,
-                selectedAlgo,
-                activeDbPath,
-              );
-
-            if (duplicateScanCancelled) break;
-            if (scanRes && scanRes.success && scanRes.duplicates) {
-              scanRes.duplicates.forEach((dup) => {
-                allDuplicates.push({ ...dup, tableName: currentTable });
-              });
-            }
-          }
-
-          if (duplicateScanCancelled) return;
-          showNotificationWithProgress("Analysis completed", 100, true);
-
-          if (allDuplicates.length === 0) {
-            resultsBody.innerHTML =
-              "<p style='color: var(--success, #10b981);'>No duplicates found.</p>";
-            toolbar.classList.add("hidden");
-            if (btnExpandDups) btnExpandDups.classList.add("hidden");
-          } else {
-            showNotification(
-              `${allDuplicates.length} duplicate(s) found.`,
-              true,
-            );
-            statusDiv.textContent = `${allDuplicates.length} duplicate(s) identified with "${selectedAlgo === "general" ? "General" : "CIN + NOM"}" algorithm`;
-
-            let html = `
-                            <div style="margin-bottom: 12px; font-weight: bold; color: var(--primary-color, #4f46e5);">
-                                ${allDuplicates.length} duplicate(s) identified
-                                ${selectedAlgo === "cin_nom" ? "(CIN + NOM similarity analysis)" : "(General analysis on all columns)"}
-                            </div>
-                            <div class="duplicates-table-wrapper">
-                                <table>
-                                    <thead>
-                                        <tr>
-                                            <th style="width: 50px; text-align: center;">Delete</th>
-                                            <th>Table</th>
-                                            <th style="min-width: 150px;">Duplicate</th>
-                                            <th style="min-width: 150px;">Reference</th>
-                                            <th style="min-width: 250px;">Comparative details</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                        `;
-
-            allDuplicates.forEach((dup, idx) => {
-              const tableName = escapeHtml(dup.tableName || dup.table);
-              const rowIndex = escapeHtml(dup.row_index);
-              const refId = escapeHtml(dup.reference_id);
-
-              let dupDetails = Object.entries(dup.data || {})
-                .filter(([k]) => k !== "rowid")
-                .map(
-                  ([k, v]) =>
-                    `<strong>${escapeHtml(k)}</strong>: ${escapeHtml(v)}`,
-                )
-                .join(" | ");
-
-              let refDetails = dup.reference_data
-                ? Object.entries(dup.reference_data)
-                    .filter(([k]) => k !== "rowid")
-                    .map(
-                      ([k, v]) =>
-                        `<strong>${escapeHtml(k)}</strong>: ${escapeHtml(v)}`,
-                    )
-                    .join(" | ")
-                : "<em>Identical data</em>";
-
-              let dupLabel = `ID #${rowIndex}`;
-              let refLabel = `ID #${refId}`;
-
-              if (dup.algorithm === "cin_nom" && dup.cin_col && dup.nom_col) {
-                dupLabel = `${escapeHtml(dup.cin_col)}=${escapeHtml(dup.cin_value)} | ${escapeHtml(dup.nom_col)}=${escapeHtml(dup.nom_value)}`;
-              }
-
-              html += `
-                                <tr style="border-bottom: 1px solid var(--border-color, #e2e8f0); background: ${idx % 2 === 0 ? "transparent" : "rgba(0,0,0,0.015)"};">
-                                    <td style="text-align: center; width: 50px; padding: 0.5rem 0.8rem;">
-                                        <input type="checkbox" class="dup-checkbox" 
-                                               data-index="${idx}" 
-                                               data-table="${tableName}" 
-                                               data-rowid="${rowIndex}" 
-                                               checked 
-                                               style="width: 20px; height: 20px; cursor: pointer;" />
-                                    </td>
-                                    <td style="font-weight: 600; white-space: nowrap; padding: 0.5rem 0.8rem;">${tableName}</td>
-                                    <td class="dup-col-doublon" style="color: #e74c3c; font-weight: 600; background: rgba(231, 76, 60, 0.05); padding: 0.5rem 0.8rem; max-width: 200px; word-break: break-word;">
-                                        <div style="font-weight: 600; font-size: 0.8rem;">${dupLabel}</div>
-                                        <div style="font-size: 0.75rem; color: var(--text-muted, #64748b);">${dupDetails.substring(0, 100)}${dupDetails.length > 100 ? "..." : ""}</div>
-                                    </td>
-                                    <td class="dup-col-reference" style="color: #27ae60; font-weight: 600; background: rgba(39, 174, 96, 0.05); padding: 0.5rem 0.8rem; max-width: 200px; word-break: break-word;">
-                                        <div style="font-weight: 600; font-size: 0.8rem;">${refLabel}</div>
-                                        <div style="font-size: 0.75rem; color: var(--text-muted, #64748b);">${refDetails.substring(0, 100)}${refDetails.length > 100 ? "..." : ""}</div>
-                                    </td>
-                                    <td style="font-size: 0.8rem; min-width: 250px; padding: 0.5rem 0.8rem; word-break: break-word;">
-                                        <div style="color: #e74c3c;"><strong>Duplicate:</strong> ${dupDetails}</div>
-                                        <div style="color: #27ae60; margin-top: 4px;"><strong>Reference:</strong> ${refDetails}</div>
-                                    </td>
-                                </tr>
-                            `;
-            });
-
-            html += `
-                                    </tbody>
-                                </table>
-                            </div>
-                        `;
-
-            resultsBody.innerHTML = html;
-
-            document.querySelectorAll(".dup-checkbox").forEach((chk) => {
-              chk.addEventListener("change", updateSelectAllButton);
-            });
-          }
-        } catch (err) {
-          console.error("Error scanning duplicates:", err);
-          resultsBody.innerHTML =
-            "<p style='color: var(--error, #ef4444);'>Communication error with server.</p>";
-        }
-      });
-    });
-  }
-
-  function updateSelectAllButton() {
-    const checkboxes = document.querySelectorAll(".dup-checkbox");
-    const selectAllBtn = document.querySelector("#btn-select-all-dups");
-    if (!selectAllBtn || checkboxes.length === 0) return;
-
-    const checked = Array.from(checkboxes).filter((chk) => chk.checked).length;
-    const total = checkboxes.length;
-
-    if (checked === total) {
-      selectAllBtn.textContent = "Deselect all";
-    } else if (checked === 0) {
-      selectAllBtn.textContent = "Select all";
-    } else {
-      selectAllBtn.textContent = `Select all (${checked}/${total})`;
-    }
-  }
-
-  if (btnCancelDups) {
-    btnCancelDups.addEventListener("click", () => {
-      duplicateScanCancelled = true;
-      const content = document.querySelector("#db-results-content");
-      const toolbar = document.querySelector("#duplicate-actions-toolbar");
-      if (content)
-        content.innerHTML = "<p style='color: orange;'>Analysis cancelled.</p>";
-      if (toolbar) toolbar.classList.add("hidden");
-      if (btnExpandDups) btnExpandDups.classList.add("hidden");
-    });
-  }
-
-  if (btnSelectAll) {
-    btnSelectAll.addEventListener("click", () => {
-      const checkboxes = document.querySelectorAll(".dup-checkbox");
-      if (checkboxes.length === 0) return;
-      const allChecked = Array.from(checkboxes).every((chk) => chk.checked);
-
-      checkboxes.forEach((chk) => {
-        chk.checked = !allChecked;
-      });
-      btnSelectAll.textContent = allChecked ? "Select all" : "Deselect all";
-    });
-  }
-
-  if (btnDeleteDups) {
-    btnDeleteDups.addEventListener("click", async () => {
-      const checkedBoxes = document.querySelectorAll(".dup-checkbox:checked");
-      if (checkedBoxes.length === 0) {
-        alert("Please select at least one duplicate to delete.");
-        return;
-      }
-      if (
-        !confirm(
-          `Warning: you are about to permanently delete ${checkedBoxes.length} duplicate(s) while preserving original rows. Continue ?`,
-        )
-      )
-        return;
-
-      try {
-        await waitForApi();
-        let successCount = 0;
-        const selectEl = document.getElementById("db-file-select");
-        const activeDbPath = selectEl ? selectEl.value : null;
-
-        for (const chk of checkedBoxes) {
-          const tableName = chk.getAttribute("data-table");
-          const rowIndex = chk.getAttribute("data-rowid");
-          if (window.pywebview?.api?.delete_table_row) {
-            const res = await window.pywebview.api.delete_table_row(
-              tableName,
-              rowIndex,
-              activeDbPath,
-            );
-            if (res && res.success) successCount++;
-          }
-        }
-        showNotification(
-          `${successCount} duplicate(s) deleted successfully.`,
-          true,
-        );
-        logUserAction(`Deletion of ${successCount} duplicates`);
-        document.querySelector("#db-results-container").classList.add("hidden");
-        if (btnExpandDups) btnExpandDups.classList.add("hidden");
-      } catch (err) {
-        console.error("Error deleting:", err);
-      }
-    });
-  }
-
-  if (btnSaveDups) {
-    btnSaveDups.addEventListener("click", async () => {
-      showNotification("Duplicate actions saved successfully.", true);
-      logUserAction("Saving duplicate actions");
-    });
-  }
-
-  if (btnClean) {
-    btnClean.addEventListener("click", async () => {
-      if (confirm("Replace all empty, NaN or Null values with defaults ?")) {
-        try {
-          await waitForApi();
-          const selectEl = document.getElementById("db-file-select");
-          const activeDbPath = selectEl ? selectEl.value : null;
-          const res =
-            await window.pywebview.api.clean_database_values(activeDbPath);
-          alert(res?.message || "Cleaning completed.");
-          logUserAction("Database cleaning executed");
-        } catch (e) {
-          console.error("Error cleaning:", e);
-        }
-      }
-    });
-  }
-
-  if (btnExport) {
-    btnExport.addEventListener("click", async () => {
-      try {
-        await waitForApi();
-        const saveRes = await window.pywebview.api.select_excel_file();
-        if (saveRes && saveRes.success) {
-          const selectEl = document.getElementById("db-file-select");
-          const activeDbPath = selectEl ? selectEl.value : null;
-
-          showNotificationWithProgress("Exporting to Excel...", 30, true);
-          const res = await window.pywebview.api.export_database_to_excel(
-            saveRes.file_path,
-            activeDbPath,
-          );
-          showNotificationWithProgress("Export completed", 100, true);
-
-          alert(res?.message || "Export successful.");
-          logUserAction("Export database to Excel");
-        }
-      } catch (e) {
-        console.error("Error exporting:", e);
-      }
-    });
-  }
-
-  if (btnExpandDups) {
-    btnExpandDups.addEventListener("click", () => {
-      const contentElem = document.querySelector("#db-results-content");
-      if (
-        !contentElem ||
-        !contentElem.innerHTML.trim() ||
-        contentElem.innerHTML.includes("No duplicates")
-      ) {
-        alert("Please run a valid duplicate analysis first.");
-        return;
-      }
-      openFullScreenModal(
-        "Advanced Duplicate Management - Expanded View",
-        contentElem.innerHTML,
-      );
-    });
-  }
-
-  if (btnExpandManipulate) {
-    btnExpandManipulate.addEventListener("click", () => {
-      const container = document.querySelector(
-        "#manipulate-results-table-container",
-      );
-      if (!container || !container.querySelector("table")) {
-        alert("No result table to expand.");
-        return;
-      }
-      openFullScreenModal(
-        "Data Manipulation - Full Screen Expanded View",
-        container.innerHTML,
-      );
-    });
-  }
-}
-
-// === REQUÊTES SQL INTERACTIVES ===
-function initSqlOperations() {
-  document.querySelectorAll(".op-btn").forEach((btn) => {
-    btn.addEventListener("click", (e) => {
-      document.querySelectorAll(".op-btn").forEach((b) => {
-        b.style.background = "";
-        b.style.color = "";
-      });
-      e.target.style.background = "var(--primary-color, #4f46e5)";
-      e.target.style.color = "#ffffff";
-      const opType = e.target.getAttribute("data-op");
-      document.getElementById("selected-operation-type").value = opType;
-    });
-  });
-
-  const btnExecuteOp = document.getElementById("btn-execute-operation");
-  if (btnExecuteOp) {
-    btnExecuteOp.addEventListener("click", async () => {
-      const tableName = document.getElementById(
-        "manipulate-table-select",
-      )?.value;
-      const opType =
-        document.getElementById("selected-operation-type")?.value ||
-        "SELECT_ALL";
-      const attribute = document.getElementById("op-attribute-select")?.value;
-      const value = document.getElementById("op-value-input")?.value;
-      const groupBy = document.getElementById("op-groupby-select")?.value;
-
-      if (!tableName) {
-        showNotification("Please select and validate a table first.", false);
-        return;
-      }
-
-      try {
-        await waitForApi();
-        const selectEl = document.getElementById("db-file-select");
-        const activeDbPath = selectEl ? selectEl.value : null;
-
-        const res = await window.pywebview.api.execute_custom_sql_operation(
-          tableName,
-          opType,
-          attribute,
-          value,
-          groupBy,
-          activeDbPath,
-        );
-        if (res?.success) {
-          displayData(
-            res.data,
-            document.querySelector("#manipulate-results-table-container"),
-            document.querySelector("#manipulate-response-count"),
-          );
-          showNotification(`SQL query (${opType}) executed successfully.`);
-          logUserAction(`Execution of query ${opType} on ${tableName}`);
-        } else {
-          showNotification(res?.message || "Error executing SQL query.", false);
-        }
-      } catch (err) {
-        console.error(err);
-        showNotification("Communication error with API.", false);
-      }
-    });
-  }
-
-  const btnResetOp = document.getElementById("btn-reset-operation");
-  if (btnResetOp) {
-    btnResetOp.addEventListener("click", () => {
-      const hiddenOpType = document.getElementById("selected-operation-type");
-      if (hiddenOpType) hiddenOpType.value = "SELECT_ALL";
-
-      document.querySelectorAll(".op-btn").forEach((b) => {
-        b.style.background = "";
-        b.style.color = "";
-      });
-      const firstOpBtn = document.querySelector(
-        '.op-btn[data-op="SELECT_ALL"]',
-      );
-      if (firstOpBtn) {
-        firstOpBtn.style.background = "var(--primary-color, #4f46e5)";
-        firstOpBtn.style.color = "#ffffff";
-      }
-
-      const attrSelect = document.getElementById("op-attribute-select");
-      if (attrSelect) attrSelect.value = "";
-
-      const valueInput = document.getElementById("op-value-input");
-      if (valueInput) valueInput.value = "";
-
-      const groupSelect = document.getElementById("op-groupby-select");
-      if (groupSelect) groupSelect.value = "";
-
-      showNotification("Query form reset.", true);
-    });
-  }
-}
-
-// === MODAL PLEIN ÉCRAN ===
+// ============================================
+// MODAL PLEIN ECRAN
+// ============================================
 function openFullScreenModal(titleText, htmlContent) {
   let modalOverlay = document.getElementById("fullscreen-modal-overlay");
   if (!modalOverlay) {
     modalOverlay = document.createElement("div");
     modalOverlay.id = "fullscreen-modal-overlay";
     modalOverlay.style.cssText = `
-            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
-            background: rgba(0, 0, 0, 0.7); backdrop-filter: blur(10px);
-            z-index: 99999; display: flex; justify-content: center; align-items: center; padding: 20px;
-        `;
+      position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+      background: rgba(0, 0, 0, 0.7); backdrop-filter: blur(10px);
+      z-index: 99999; display: flex; justify-content: center; align-items: center; padding: 20px;
+    `;
     modalOverlay.innerHTML = `
-            <div style="background: var(--card-bg, #ffffff); color: var(--text-color, #111); width: 100vw; height: 100vh; border-radius: 0; display: flex; flex-direction: column; overflow: hidden;">
-                <div style="padding: 16px 24px; border-bottom: 1px solid var(--border-color, #e2e8f0); display: flex; justify-content: space-between; align-items: center; background: var(--bg-secondary, #f8fafc);">
-                    <h2 id="modal-title-text" style="margin: 0; font-size: 1.4rem; display: flex; align-items: center; gap: 12px;"><i class="fas fa-expand"></i> <span></span></h2>
-                    <button type="button" id="close-fullscreen-modal" style="background: none; border: none; font-size: 2rem; cursor: pointer; color: var(--text-color);">&times;</button>
-                </div>
-                <div id="fullscreen-modal-body" style="padding: 24px; overflow-y: auto; flex: 1;"></div>
-                <div style="padding: 14px 24px; border-top: 1px solid var(--border-color, #e2e8f0); background: var(--bg-secondary, #f8fafc); display: flex; justify-content: flex-end;">
-                    <button type="button" class="secondary-button" id="modal-btn-fermer" style="padding: 10px 20px;">Close</button>
-                </div>
-            </div>
-        `;
+      <div style="background: #ffffff; color: #1a1a2e; width: 100vw; height: 100vh; border-radius: 0; display: flex; flex-direction: column; overflow: hidden;">
+        <div style="padding: 16px 24px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; background: #f8fafc;">
+          <h2 id="modal-title-text" style="margin: 0; font-size: 1.4rem; display: flex; align-items: center; gap: 12px; color: #1a1a2e;">
+            <i class="fas fa-expand" style="color: #4f46e5;"></i> 
+            <span style="color: #1a1a2e;">${titleText}</span>
+          </h2>
+          <button type="button" id="close-fullscreen-modal" style="background: none; border: none; font-size: 2rem; cursor: pointer; color: #1a1a2e;">&times;</button>
+        </div>
+        <div id="fullscreen-modal-body" style="padding: 24px; overflow-y: auto; flex: 1; background: #ffffff; color: #1a1a2e;"></div>
+        <div style="padding: 14px 24px; border-top: 1px solid #e2e8f0; background: #f8fafc; display: flex; justify-content: flex-end; gap: 10px;">
+          <button type="button" class="button button-primary" id="modal-btn-select-all" style="background: #4f46e5; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer;">
+            <i class="fas fa-check-double"></i> Tout selectionner
+          </button>
+          <button type="button" class="button button-primary" id="modal-btn-delete" style="background: #dc3545; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer;">
+            <i class="fas fa-trash"></i> Supprimer selectionnes
+          </button>
+          <button type="button" class="secondary-button" id="modal-btn-fermer" style="padding: 10px 20px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">
+            <i class="fas fa-times"></i> Fermer
+          </button>
+        </div>
+      </div>
+    `;
     document.body.appendChild(modalOverlay);
 
     const closeModal = () => {
@@ -2045,19 +3897,866 @@ function openFullScreenModal(titleText, htmlContent) {
   document
     .getElementById("modal-title-text")
     .querySelector("span").textContent = titleText;
-  document.getElementById("fullscreen-modal-body").innerHTML = htmlContent;
+
+  let cleanHtml = htmlContent;
+
+  if (cleanHtml.includes("<table")) {
+    cleanHtml = cleanHtml.replace(
+      /<table/g,
+      '<table style="width: 100%; border-collapse: collapse; background: #ffffff; color: #1a1a2e;"',
+    );
+    cleanHtml = cleanHtml.replace(
+      /<th/g,
+      '<th style="background: #4f46e5; color: white; padding: 10px; text-align: left; border: 1px solid #e2e8f0;"',
+    );
+    cleanHtml = cleanHtml.replace(
+      /<td/g,
+      '<td style="padding: 8px 10px; border: 1px solid #e2e8f0; background: #ffffff; color: #1a1a2e;"',
+    );
+    cleanHtml = cleanHtml.replace(/<tr/g, '<tr style="background: #ffffff;"');
+  }
+
+  document.getElementById("fullscreen-modal-body").innerHTML = cleanHtml;
   modalOverlay.style.display = "flex";
+
+  const modalSelectAllBtn = document.getElementById("modal-btn-select-all");
+  if (modalSelectAllBtn) {
+    modalSelectAllBtn.onclick = () => {
+      const checkboxes = document.querySelectorAll(
+        "#fullscreen-modal-body .dup-checkbox, #fullscreen-modal-body input[type='checkbox']",
+      );
+      if (checkboxes.length === 0) {
+        showNotification("Aucune case a cocher trouvee.", false);
+        return;
+      }
+      const allChecked = Array.from(checkboxes).every((chk) => chk.checked);
+      checkboxes.forEach((chk) => {
+        chk.checked = !allChecked;
+      });
+      showNotification(
+        allChecked ? "Tout deselectionne" : "Tout selectionne",
+        true,
+      );
+    };
+  }
+
+  const modalDeleteBtn = document.getElementById("modal-btn-delete");
+  if (modalDeleteBtn) {
+    modalDeleteBtn.onclick = async () => {
+      const checkedBoxes = document.querySelectorAll(
+        "#fullscreen-modal-body .dup-checkbox:checked, #fullscreen-modal-body input[type='checkbox']:checked",
+      );
+      if (checkedBoxes.length === 0) {
+        showNotification("Veuillez selectionner au moins un element.", false);
+        return;
+      }
+      if (
+        !confirm(`Supprimer ${checkedBoxes.length} element(s) selectionne(s) ?`)
+      )
+        return;
+
+      try {
+        let successCount = 0;
+        const activeDbPath = sessionStorage.getItem("current_db_path");
+
+        for (const chk of checkedBoxes) {
+          const tableName = chk.getAttribute("data-table");
+          const rowIndex = chk.getAttribute("data-rowid");
+          if (
+            tableName &&
+            rowIndex &&
+            window.pywebview?.api?.delete_table_row
+          ) {
+            const res = await window.pywebview.api.delete_table_row(
+              tableName,
+              rowIndex,
+              activeDbPath,
+            );
+            if (res && res.success) successCount++;
+          }
+        }
+        showNotification(`${successCount} element(s) supprime(s).`, true);
+        logUserAction(`Suppression de ${successCount} elements`);
+        document.getElementById("fullscreen-modal-overlay").style.display =
+          "none";
+      } catch (err) {
+        console.error("Erreur lors de la suppression:", err);
+        showNotification("Erreur lors de la suppression.", false);
+      }
+    };
+  }
+
+  const style = document.createElement("style");
+  style.textContent = `
+    #fullscreen-modal-body table { background: #ffffff !important; color: #1a1a2e !important; }
+    #fullscreen-modal-body th { background: #4f46e5 !important; color: white !important; }
+    #fullscreen-modal-body td { background: #ffffff !important; color: #1a1a2e !important; border: 1px solid #e2e8f0 !important; }
+    #fullscreen-modal-body tr:nth-child(even) td { background: #f8fafc !important; }
+    #fullscreen-modal-body tr:hover td { background: #e0e7ff !important; }
+  `;
+  document.getElementById("fullscreen-modal-body").appendChild(style);
 }
 
-// === ÉVÉNEMENTS PRINCIPAUX ===
+// ============================================
+// REQUETES STATISTIQUES
+// ============================================
+function initStatisticalQueries() {
+  const btnOpenStats = document.getElementById("btn-open-statistical-queries");
+  if (btnOpenStats) {
+    btnOpenStats.addEventListener("click", () => {
+      openStatisticalQueriesModal();
+    });
+  }
+}
+
+function openStatisticalQueriesModal() {
+  if (!isDbOpen) {
+    showNotification("Veuillez d'abord ouvrir une base de donnees.", false);
+    return;
+  }
+
+  const overlay = document.createElement("div");
+  overlay.className = "edit-modal-overlay";
+  overlay.style.zIndex = "99998";
+
+  overlay.innerHTML = `
+    <div style="background: #ffffff; border-radius: 12px; padding: 1.5rem; max-width: 900px; width: 95%; max-height: 85vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+        <h3 style="margin: 0; color: #1a1a2e;">
+          <i class="fas fa-chart-bar" style="color: #4f46e5;"></i> Requetes statistiques
+        </h3>
+        <button type="button" id="close-stats-modal" style="background: none; border: none; font-size: 2rem; cursor: pointer; color: #1a1a2e;">&times;</button>
+      </div>
+      <p style="color: #64748b; margin-bottom: 1.5rem;">
+        Selectionnez une requete pour obtenir des statistiques sur vos donnees.
+      </p>
+      <div id="stats-query-buttons" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; margin-bottom: 1.5rem;">
+        <button class="stat-query-btn" data-query="femmes_par_tranche_age" style="padding: 12px; border: 2px solid #4f46e5; border-radius: 8px; background: #ffffff; color: #4f46e5; font-weight: 600; cursor: pointer; text-align: left;">
+          <i class="fas fa-female"></i> Femmes par tranche d'age
+        </button>
+        <button class="stat-query-btn" data-query="personnes_par_commune" style="padding: 12px; border: 2px solid #4f46e5; border-radius: 8px; background: #ffffff; color: #4f46e5; font-weight: 600; cursor: pointer; text-align: left;">
+          <i class="fas fa-map-marker-alt"></i> Personnes par commune
+        </button>
+        <button class="stat-query-btn" data-query="personnes_par_lieu" style="padding: 12px; border: 2px solid #4f46e5; border-radius: 8px; background: #ffffff; color: #4f46e5; font-weight: 600; cursor: pointer; text-align: left;">
+          <i class="fas fa-location-dot"></i> Personnes par lieu (fkt)
+        </button>
+        <button class="stat-query-btn" data-query="superficie_par_personne" style="padding: 12px; border: 2px solid #4f46e5; border-radius: 8px; background: #ffffff; color: #4f46e5; font-weight: 600; cursor: pointer; text-align: left;">
+          <i class="fas fa-ruler-combined"></i> Superficie par personne
+        </button>
+        <button class="stat-query-btn" data-query="hommes_femmes" style="padding: 12px; border: 2px solid #4f46e5; border-radius: 8px; background: #ffffff; color: #4f46e5; font-weight: 600; cursor: pointer; text-align: left;">
+          <i class="fas fa-venus-mars"></i> Repartition Hommes / Femmes
+        </button>
+        <button class="stat-query-btn" data-query="personnes_par_filiere" style="padding: 12px; border: 2px solid #4f46e5; border-radius: 8px; background: #ffffff; color: #4f46e5; font-weight: 600; cursor: pointer; text-align: left;">
+          <i class="fas fa-seedling"></i> Personnes par filiere
+        </button>
+        <button class="stat-query-btn" data-query="personnes_par_categorisation" style="padding: 12px; border: 2px solid #4f46e5; border-radius: 8px; background: #ffffff; color: #4f46e5; font-weight: 600; cursor: pointer; text-align: left;">
+          <i class="fas fa-users"></i> Personnes par categorisation EAF
+        </button>
+        <button class="stat-query-btn" data-query="age_moyen" style="padding: 12px; border: 2px solid #4f46e5; border-radius: 8px; background: #ffffff; color: #4f46e5; font-weight: 600; cursor: pointer; text-align: left;">
+          <i class="fas fa-birthday-cake"></i> Age moyen des personnes
+        </button>
+        <button class="stat-query-btn" data-query="superficie_totale" style="padding: 12px; border: 2px solid #4f46e5; border-radius: 8px; background: #ffffff; color: #4f46e5; font-weight: 600; cursor: pointer; text-align: left;">
+          <i class="fas fa-chart-area"></i> Superficie totale
+        </button>
+      </div>
+      <div id="stats-query-params" style="margin-bottom: 1.5rem; display: none;"></div>
+      <div id="stats-query-results" style="background: #f8fafc; border-radius: 8px; padding: 1rem; min-height: 100px; color: #334155;">
+        <p style="color: #64748b; text-align: center;">
+          <i class="fas fa-info-circle"></i> Selectionnez une requete pour afficher les resultats.
+        </p>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+
+  const closeModal = () => overlay.remove();
+  overlay.querySelector("#close-stats-modal").onclick = closeModal;
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) closeModal();
+  });
+
+  const resultsContainer = overlay.querySelector("#stats-query-results");
+  const paramsContainer = overlay.querySelector("#stats-query-params");
+
+  overlay.querySelectorAll(".stat-query-btn").forEach((btn) => {
+    btn.addEventListener("click", async function () {
+      overlay.querySelectorAll(".stat-query-btn").forEach((b) => {
+        b.style.background = "#ffffff";
+        b.style.color = "#4f46e5";
+      });
+      this.style.background = "#4f46e5";
+      this.style.color = "#ffffff";
+
+      const queryType = this.getAttribute("data-query");
+      paramsContainer.style.display = "none";
+      paramsContainer.innerHTML = "";
+
+      // Cas special : femmes par tranche d'age -> afficher les parametres
+      if (queryType === "femmes_par_tranche_age") {
+        paramsContainer.style.display = "block";
+        paramsContainer.innerHTML = `
+          <div style="background: #e0e7ff; padding: 12px; border-radius: 6px; margin-bottom: 12px;">
+            <label style="display: block; font-weight: 600; margin-bottom: 6px; color: #1a1a2e;">
+              Age minimum :
+            </label>
+            <input type="number" id="stat-age-min" value="0" min="0" max="120" style="padding: 8px; border-radius: 4px; border: 1px solid #cbd5e1; width: 100px; margin-right: 12px;" />
+            <label style="display: block; font-weight: 600; margin-bottom: 6px; margin-top: 8px; color: #1a1a2e;">
+              Age maximum :
+            </label>
+            <input type="number" id="stat-age-max" value="120" min="0" max="120" style="padding: 8px; border-radius: 4px; border: 1px solid #cbd5e1; width: 100px;" />
+          </div>
+        `;
+      }
+
+      resultsContainer.innerHTML =
+        '<p style="text-align: center; color: #64748b;"><i class="fas fa-spinner fa-spin"></i> Chargement...</p>';
+
+      try {
+        await waitForApi();
+        const activeDbPath = sessionStorage.getItem("current_db_path");
+
+        const params = {};
+        if (queryType === "femmes_par_tranche_age") {
+          params.age_min = parseInt(
+            overlay.querySelector("#stat-age-min")?.value || 0,
+          );
+          params.age_max = parseInt(
+            overlay.querySelector("#stat-age-max")?.value || 120,
+          );
+        } else if (queryType === "personnes_par_lieu") {
+          params.lieu_type = "fkt";
+        }
+
+        const result = await window.pywebview.api.execute_statistical_query(
+          queryType,
+          params,
+          activeDbPath,
+        );
+
+        if (result?.success && result.data.length > 0) {
+          let html =
+            '<table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">';
+          html += '<thead><tr style="background: #4f46e5; color: white;">';
+          const firstRow = result.data[0];
+          Object.keys(firstRow).forEach((k) => {
+            html += `<th style="padding: 10px; text-align: left; border: 1px solid #e2e8f0;">${escapeHtml(k)}</th>`;
+          });
+          html += "</tr></thead><tbody>";
+
+          result.data.forEach((row, idx) => {
+            html += `<tr style="background: ${idx % 2 === 0 ? "#ffffff" : "#f8fafc"};">`;
+            Object.values(row).forEach((val) => {
+              html += `<td style="padding: 8px 10px; border: 1px solid #e2e8f0;">${escapeHtml(String(val ?? ""))}</td>`;
+            });
+            html += "</tr>";
+          });
+          html += "</tbody></table>";
+
+          resultsContainer.innerHTML = html;
+
+          // Reattacher les ecouteurs sur les inputs si necessaire
+          if (queryType === "femmes_par_tranche_age") {
+            const minInput = overlay.querySelector("#stat-age-min");
+            const maxInput = overlay.querySelector("#stat-age-max");
+            if (minInput)
+              minInput.addEventListener("change", () => btn.click());
+            if (maxInput)
+              maxInput.addEventListener("change", () => btn.click());
+          }
+
+          logUserAction(`Requete statistique : ${queryType}`);
+        } else {
+          resultsContainer.innerHTML =
+            '<p style="text-align: center; color: #f39c12;"><i class="fas fa-info-circle"></i> Aucun resultat pour cette requete.</p>';
+        }
+      } catch (err) {
+        console.error(err);
+        resultsContainer.innerHTML =
+          '<p style="text-align: center; color: #ef4444;"><i class="fas fa-exclamation-circle"></i> Erreur lors du chargement.</p>';
+      }
+    });
+  });
+}
+
+// ============================================
+// INITIALISATION DES NOUVELLES FONCTIONNALITES
+// ============================================
+function initNewFeatures() {
+  const btnExportResult = document.getElementById("btn-export-result");
+  if (btnExportResult) {
+    btnExportResult.addEventListener("click", () => {
+      const container = document.querySelector(
+        "#manipulate-results-table-container",
+      );
+      if (!container || !container.querySelector("table")) {
+        showNotification("Aucun resultat a exporter.", false);
+        return;
+      }
+      showExportDialog(async (format) => {
+        if (format === "pdf") await exportResultsToPDF();
+        else if (format === "excel") await exportResultsToExcel();
+      });
+    });
+  }
+
+  const btnStats = document.getElementById("btn-generate-stats");
+  if (btnStats) {
+    btnStats.addEventListener("click", generateStatistics);
+  }
+
+  const btnChartNom = document.getElementById("btn-chart-nom");
+  if (btnChartNom)
+    btnChartNom.addEventListener("click", () => generateChart("nom"));
+
+  const btnChartCin = document.getElementById("btn-chart-cin");
+  if (btnChartCin)
+    btnChartCin.addEventListener("click", () => generateChart("cin"));
+
+  const btnChartRegion = document.getElementById("btn-chart-region");
+  if (btnChartRegion)
+    btnChartRegion.addEventListener("click", () => generateChart("region"));
+
+  const btnChartAll = document.getElementById("btn-chart-all");
+  if (btnChartAll) {
+    btnChartAll.addEventListener("click", () => {
+      document.querySelector("#charts-container").innerHTML = "";
+      generateChart("all");
+    });
+  }
+
+  const opButtons = ["sum", "avg", "min", "max", "count", "countif", "sort"];
+  opButtons.forEach((op) => {
+    const btn = document.getElementById(`btn-op-${op}`);
+    if (btn) btn.addEventListener("click", () => performResultOperation(op));
+  });
+
+  const btnOpenDb = document.getElementById("btn-open-database");
+  if (btnOpenDb) btnOpenDb.addEventListener("click", openSelectedDatabase);
+
+  // ✅ Nouveau bouton : Supprimer la base selectionnee
+  const btnDeleteSelectedDb = document.getElementById("btn-delete-selected-db");
+  if (btnDeleteSelectedDb) {
+    btnDeleteSelectedDb.addEventListener("click", deleteSelectedDatabase);
+  }
+
+  const terminateBtns = [
+    document.getElementById("btn-terminate-database-existing"),
+    document.getElementById("btn-terminate-database-duplicates"),
+    document.getElementById("btn-terminate-database-manipulate"),
+  ];
+  terminateBtns.forEach((btn) => {
+    if (btn) btn.addEventListener("click", terminateDatabase);
+  });
+
+  const btnCreateDb = document.getElementById("btn-create-db");
+  if (btnCreateDb) {
+    btnCreateDb.addEventListener("click", () => {
+      resetCreateDbView();
+      showView(createDbView);
+    });
+  }
+
+  const btnCreateDbBack = document.getElementById("btn-create-db-back");
+  if (btnCreateDbBack) {
+    btnCreateDbBack.addEventListener("click", () => {
+      showView(dashboardView);
+    });
+  }
+
+  const btnSelectCreateExcel = document.getElementById(
+    "btn-select-create-excel",
+  );
+  if (btnSelectCreateExcel) {
+    btnSelectCreateExcel.addEventListener("click", selectCreateDbExcelFile);
+  }
+
+  const btnCreateFromExcel = document.getElementById("btn-create-from-excel");
+  if (btnCreateFromExcel) {
+    btnCreateFromExcel.addEventListener("click", createDatabaseFromExcel);
+  }
+
+  const btnCreateEmpty = document.getElementById("btn-create-empty");
+  if (btnCreateEmpty) {
+    btnCreateEmpty.addEventListener("click", createEmptyDatabase);
+  }
+
+  const btnExportCreated = document.getElementById("btn-export-created-db");
+  if (btnExportCreated) {
+    btnExportCreated.addEventListener("click", exportCreatedDatabaseToExcel);
+  }
+
+  // Bouton Creation Listes meres
+  const btnCreateMasterList = document.getElementById("btn-create-master-list");
+  if (btnCreateMasterList) {
+    btnCreateMasterList.addEventListener("click", createMasterList);
+  }
+
+  // Bouton Requetes statistiques
+  const btnOpenStats = document.getElementById("btn-open-statistical-queries");
+  if (btnOpenStats) {
+    btnOpenStats.addEventListener("click", openStatisticalQueriesModal);
+  }
+}
+
+// ============================================
+// EXPORT DES RESULTATS
+// ============================================
+async function exportResultsToExcel() {
+  const container = document.querySelector(
+    "#manipulate-results-table-container",
+  );
+  if (!container) return;
+  const table = container.querySelector("table");
+  if (!table) return;
+
+  try {
+    const headers = [];
+    const data = [];
+    const thead = table.querySelector("thead");
+    if (thead) {
+      thead.querySelectorAll("th").forEach((th) => {
+        const text = th.textContent.trim();
+        if (text !== "Actions") headers.push(text);
+      });
+    }
+
+    const tbody = table.querySelector("tbody");
+    if (tbody) {
+      tbody.querySelectorAll("tr").forEach((row) => {
+        const rowData = {};
+        const cells = row.querySelectorAll("td");
+        let headerIdx = 0;
+        cells.forEach((td, idx) => {
+          if (idx === 0) return;
+          if (headerIdx < headers.length) {
+            rowData[headers[headerIdx]] = td.textContent.trim();
+            headerIdx++;
+          }
+        });
+        data.push(rowData);
+      });
+    }
+
+    if (data.length === 0) {
+      showNotification("Aucune donnee a exporter.", false);
+      return;
+    }
+
+    const result = await window.pywebview.api.select_excel_export_file();
+    if (!result || !result.success) return;
+
+    showNotificationWithProgress("Export vers Excel en cours...", 30, true);
+    const exportResult = await window.pywebview.api.generate_excel_from_data(
+      result.file_path,
+      data,
+      headers,
+    );
+    showNotificationWithProgress("Export termine.", 100, true);
+
+    if (exportResult && exportResult.success) {
+      showNotification(`Excel exporte : ${result.file_path}`, true);
+      logUserAction(`Export des resultats vers Excel`);
+    } else {
+      showNotification(
+        exportResult?.message || "Erreur lors de l'export Excel.",
+        false,
+      );
+    }
+  } catch (error) {
+    console.error("Erreur export Excel:", error);
+    showNotification("Erreur lors de l'export Excel.", false);
+  }
+}
+
+async function exportResultsToPDF() {
+  const container = document.querySelector(
+    "#manipulate-results-table-container",
+  );
+  if (!container) return;
+  const table = container.querySelector("table");
+  if (!table) return;
+
+  try {
+    const result = await window.pywebview.api.select_pdf_file();
+    if (!result || !result.success) return;
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="UTF-8">
+        <title>Export des resultats</title>
+        <style>
+          body { font-family: Arial, sans-serif; padding: 40px; }
+          h1 { color: #4f46e5; border-bottom: 3px solid #4f46e5; padding-bottom: 10px; }
+          table { width: 100%; border-collapse: collapse; margin: 20px 0; font-size: 11px; }
+          th { background: #4f46e5; color: white; padding: 10px; text-align: left; }
+          td { padding: 8px 10px; border-bottom: 1px solid #ddd; }
+          tr:nth-child(even) { background: #f8fafc; }
+          .info { margin-bottom: 20px; color: #666; }
+          .footer { margin-top: 40px; color: #999; font-size: 11px; border-top: 1px solid #eee; padding-top: 20px; text-align: center; }
+        </style>
+      </head>
+      <body>
+        <h1>Export des resultats</h1>
+        <div class="info">
+          <p><strong>Date :</strong> ${new Date().toLocaleString()}</p>
+          <p><strong>Nombre de resultats :</strong> ${table.querySelectorAll("tbody tr").length}</p>
+        </div>
+        ${table.outerHTML}
+        <div class="footer">Rapport genere par Data Manager</div>
+      </body>
+      </html>
+    `;
+
+    showNotificationWithProgress("Generation du PDF...", 50, true);
+    const pdfResult = await window.pywebview.api.generate_pdf_from_html(
+      result.file_path,
+      htmlContent,
+    );
+    showNotificationWithProgress("PDF genere.", 100, true);
+
+    if (pdfResult && pdfResult.success) {
+      showNotification(`PDF exporte : ${result.file_path}`, true);
+      logUserAction(`Export des resultats vers PDF`);
+    } else {
+      showNotification(
+        pdfResult?.message || "Erreur lors de la generation du PDF.",
+        false,
+      );
+    }
+  } catch (error) {
+    console.error("Erreur export PDF:", error);
+    showNotification("Erreur lors de l'export PDF.", false);
+  }
+}
+
+// ============================================
+// STATISTIQUES ET GRAPHIQUES
+// ============================================
+async function generateStatistics() {
+  const tableName = currentManipulateTable;
+
+  if (!tableName) {
+    showNotification("Veuillez selectionner une table.", false);
+    return;
+  }
+
+  const container = document.querySelector("#statistics-container");
+  const section = document.querySelector("#statistics-section");
+  section.classList.remove("hidden");
+  container.innerHTML = "<p>Calcul des statistiques...</p>";
+
+  try {
+    const activeDbPath = sessionStorage.getItem("current_db_path");
+    const stats = await window.pywebview.api.get_table_statistics(
+      tableName,
+      activeDbPath,
+    );
+
+    if (!stats || !stats.success) {
+      container.innerHTML = `<p style="color: red;">${stats?.message || "Erreur."}</p>`;
+      return;
+    }
+
+    let html =
+      '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem;">';
+
+    for (const [col, data] of Object.entries(stats.stats)) {
+      if (data.type === "numerique") {
+        html += `
+          <div class="stat-card">
+            <h4>${escapeHtml(col)}</h4>
+            <div class="stat-grid">
+              <span class="label">Effectif :</span><span class="value">${data.count}</span>
+              <span class="label">Moyenne :</span><span class="value">${data.average !== null ? data.average : "-"}</span>
+              <span class="label">Minimum :</span><span class="value">${data.min !== null ? data.min : "-"}</span>
+              <span class="label">Maximum :</span><span class="value">${data.max !== null ? data.max : "-"}</span>
+              <span class="label">Somme :</span><span class="value">${data.sum !== null ? data.sum : "-"}</span>
+            </div>
+          </div>
+        `;
+      } else {
+        html += `
+          <div class="stat-card" style="border-left-color: #10b981;">
+            <h4>${escapeHtml(col)}</h4>
+            <div style="font-size: 0.9rem;">
+              <span class="label">Valeurs distinctes :</span> <strong>${data.distinct_count}</strong>
+              <span class="label" style="margin-left: 1rem;">Total :</span> <strong>${data.total_count}</strong>
+            </div>
+          </div>
+        `;
+      }
+    }
+
+    html += "</div>";
+    container.innerHTML = html;
+    showNotification("Statistiques generees.", true);
+  } catch (error) {
+    console.error("Erreur statistiques:", error);
+    container.innerHTML = '<p style="color: red;">Erreur lors du calcul.</p>';
+  }
+}
+
+async function generateChart(chartType) {
+  const tableName = currentManipulateTable;
+
+  if (!tableName) {
+    showNotification("Veuillez selectionner une table.", false);
+    return;
+  }
+
+  const section = document.querySelector("#charts-section");
+  const container = document.querySelector("#charts-container");
+  section.classList.remove("hidden");
+
+  let column = "";
+  let title = "";
+
+  switch (chartType) {
+    case "nom":
+      column = "nom";
+      title = "Distribution des Noms";
+      break;
+    case "cin":
+      column = "cin";
+      title = "Distribution des CIN";
+      break;
+    case "region":
+      column = "region";
+      title = "Distribution par Region";
+      break;
+    default:
+      container.innerHTML = "";
+      await generateChart("nom");
+      await generateChart("cin");
+      await generateChart("region");
+      return;
+  }
+
+  try {
+    const activeDbPath = sessionStorage.getItem("current_db_path");
+    const struct =
+      await window.pywebview.api.get_database_structure_matrix(activeDbPath);
+    const columns = struct.structure[tableName] || [];
+
+    let foundCol = null;
+    for (const col of columns) {
+      const colLower = col.toLowerCase();
+      if (colLower.includes(column) || colLower === column) {
+        foundCol = col;
+        break;
+      }
+    }
+
+    if (!foundCol) {
+      showNotification(`Colonne "${column}" non trouvee.`, false);
+      return;
+    }
+
+    const distribution = await window.pywebview.api.get_table_distribution(
+      tableName,
+      foundCol,
+      activeDbPath,
+    );
+
+    if (!distribution || !distribution.success) {
+      showNotification(distribution?.message || "Erreur.", false);
+      return;
+    }
+
+    const data = distribution.distribution;
+    const maxCount =
+      data.length > 0 ? Math.max(...data.map((d) => d.count)) : 1;
+
+    let chartHtml = `
+      <div class="chart-container">
+        <h4>${title}</h4>
+        <div class="chart-bar-container">
+    `;
+
+    data.slice(0, 30).forEach((item) => {
+      const percentage = maxCount > 0 ? (item.count / maxCount) * 100 : 0;
+      chartHtml += `
+        <div class="chart-bar-row">
+          <span class="chart-bar-label">${escapeHtml(String(item.value).substring(0, 30))}</span>
+          <div class="chart-bar-track">
+            <div class="chart-bar-fill" style="width: ${percentage}%"></div>
+          </div>
+          <span class="chart-bar-count">${item.count}</span>
+        </div>
+      `;
+    });
+
+    chartHtml += `
+        </div>
+        <div style="margin-top: 8px; font-size: 0.75rem; color: var(--text-muted, #64748b);">
+          ${data.length > 30 ? `30 premieres sur ${data.length}` : `${data.length} valeur(s)`}
+        </div>
+      </div>
+    `;
+
+    if (chartType === "all") {
+      container.innerHTML += chartHtml;
+    } else {
+      container.innerHTML = chartHtml;
+    }
+
+    showNotification(`Graphique "${title}" genere.`, true);
+  } catch (error) {
+    console.error("Erreur graphique:", error);
+    showNotification("Erreur lors de la generation.", false);
+  }
+}
+
+function performResultOperation(operation) {
+  const container = document.querySelector(
+    "#manipulate-results-table-container",
+  );
+  const output = document.querySelector("#result-operations-output");
+  const section = document.querySelector("#result-operations-section");
+
+  if (!container) return;
+  const table = container.querySelector("table");
+  if (!table) {
+    showNotification("Aucune donnee a traiter.", false);
+    return;
+  }
+
+  section.classList.remove("hidden");
+
+  try {
+    const numericData = [];
+    const headers = [];
+    const thead = table.querySelector("thead");
+    if (thead) {
+      thead.querySelectorAll("th").forEach((th) => {
+        const text = th.textContent.trim();
+        if (text !== "Actions") headers.push(text);
+      });
+    }
+
+    const tbody = table.querySelector("tbody");
+    if (!tbody) return;
+
+    tbody.querySelectorAll("tr").forEach((row) => {
+      const cells = row.querySelectorAll("td");
+      let headerIdx = 0;
+      cells.forEach((td, idx) => {
+        if (idx === 0) return;
+        if (headerIdx < headers.length) {
+          const val = parseFloat(td.textContent.trim().replace(/,/g, "."));
+          if (!isNaN(val)) {
+            if (!numericData[headerIdx]) numericData[headerIdx] = [];
+            numericData[headerIdx].push(val);
+          }
+          headerIdx++;
+        }
+      });
+    });
+
+    if (
+      numericData.length === 0 ||
+      numericData.every((arr) => !arr || arr.length === 0)
+    ) {
+      output.innerHTML =
+        '<span style="color: orange;">Aucune donnee numerique trouvee.</span>';
+      return;
+    }
+
+    let resultHtml =
+      '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px;">';
+
+    numericData.forEach((data, idx) => {
+      if (!data || data.length === 0) return;
+      const colName = headers[idx] || `Colonne ${idx + 1}`;
+      let operationResult = "";
+      let operationLabel = "";
+
+      switch (operation) {
+        case "sum":
+          operationResult = data.reduce((a, b) => a + b, 0).toFixed(2);
+          operationLabel = "Somme";
+          break;
+        case "avg":
+          operationResult = (
+            data.reduce((a, b) => a + b, 0) / data.length
+          ).toFixed(2);
+          operationLabel = "Moyenne";
+          break;
+        case "min":
+          operationResult = Math.min(...data).toFixed(2);
+          operationLabel = "Minimum";
+          break;
+        case "max":
+          operationResult = Math.max(...data).toFixed(2);
+          operationLabel = "Maximum";
+          break;
+        case "count":
+          operationResult = data.length;
+          operationLabel = "Effectif";
+          break;
+        case "countif":
+          operationResult = data.filter((v) => v > 0).length;
+          operationLabel = "Nb > 0";
+          break;
+        case "sort":
+          operationResult = [...data].sort((a, b) => a - b).join(", ");
+          operationLabel = "Tri croissant";
+          break;
+      }
+
+      resultHtml += `
+        <div style="background: var(--bg-secondary, #f8fafc); padding: 0.75rem; border-radius: 6px; border-left: 3px solid #4f46e5;">
+          <div style="font-size: 0.75rem; color: var(--text-muted, #64748b);">${escapeHtml(colName)}</div>
+          <div style="font-size: 1rem; font-weight: 600;">
+            ${operationLabel} : ${operationResult}
+            <span style="font-size: 0.75rem; font-weight: 400; color: var(--text-muted, #64748b);">(n=${data.length})</span>
+          </div>
+        </div>
+      `;
+    });
+
+    resultHtml += "</div>";
+    output.innerHTML = resultHtml;
+    showNotification(`Operation "${operation}" effectuee.`, true);
+  } catch (error) {
+    console.error("Erreur operation:", error);
+    output.innerHTML = `<span style="color: red;">Erreur : ${error.message}</span>`;
+  }
+}
+
+// ============================================
+// REQUETES SQL INTERACTIVES
+// ============================================
+function initSqlOperations() {
+  document.querySelectorAll(".op-btn").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      document.querySelectorAll(".op-btn").forEach((b) => {
+        b.style.background = "";
+        b.style.color = "";
+      });
+      e.target.style.background = "var(--primary-color, #4f46e5)";
+      e.target.style.color = "#ffffff";
+      document.getElementById("selected-operation-type").value =
+        e.target.getAttribute("data-op");
+    });
+  });
+}
+
+// ============================================
+// EVENEMENTS PRINCIPAUX
+// ============================================
 document.addEventListener("DOMContentLoaded", () => {
   const savedTheme = localStorage.getItem("app_theme") || "light";
   applyTheme(savedTheme);
 
   initializeApp();
   initManipulatePage();
-  initAdminActions();
+  initDuplicatesPage();
   initSqlOperations();
+  initNewFeatures();
 
   if (setupForm) {
     setupForm.addEventListener("submit", async (event) => {
@@ -2065,7 +4764,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const pseudo = document.querySelector("#setup-pseudo")?.value.trim();
       const password = document.querySelector("#setup-password")?.value;
       if (!pseudo || !password) {
-        showMessage("#setup-message", "Please fill in all fields.");
+        showMessage("#setup-message", "Veuillez remplir tous les champs.");
         return;
       }
       try {
@@ -2076,7 +4775,7 @@ document.addEventListener("DOMContentLoaded", () => {
         );
         showMessage(
           "#setup-message",
-          result.message || "Operation completed.",
+          result.message || "Operation terminee.",
           result.success,
         );
         if (result.success) {
@@ -2087,7 +4786,7 @@ document.addEventListener("DOMContentLoaded", () => {
         console.error(error);
         showMessage(
           "#setup-message",
-          "Unable to communicate with the application.",
+          "Impossible de communiquer avec l'application.",
         );
       }
     });
@@ -2099,7 +4798,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const pseudo = document.querySelector("#login-pseudo")?.value.trim();
       const password = document.querySelector("#login-password")?.value;
       if (!pseudo || !password) {
-        showMessage("#login-message", "Please fill in all fields.");
+        showMessage("#login-message", "Veuillez remplir tous les champs.");
         return;
       }
       try {
@@ -2108,7 +4807,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (!result?.success) {
           showMessage(
             "#login-message",
-            result?.message || "Incorrect credentials.",
+            result?.message || "Identifiants incorrects.",
           );
           return;
         }
@@ -2118,48 +4817,42 @@ document.addEventListener("DOMContentLoaded", () => {
         console.error(error);
         showMessage(
           "#login-message",
-          "Unable to communicate with the application.",
+          "Impossible de communiquer avec l'application.",
         );
       }
     });
   }
 
-  if (logoutButton) {
-    logoutButton.addEventListener("click", async () => {
-      try {
-        await waitForApi();
-        await window.pywebview.api.logout();
-        sessionStorage.removeItem("session_active");
-        userMenu?.classList.add("hidden");
-        menuButton?.setAttribute("aria-expanded", "false");
-        showView(loginView);
-      } catch (error) {
-        console.error(error);
-      }
-    });
-  }
+  document.addEventListener("click", (e) => {
+    const logoutBtn = e.target.closest(".logout-global-btn");
+    if (logoutBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      logoutUser();
+    }
+  });
 
-  document.querySelectorAll(".quit-global-btn").forEach((btn) => {
-    btn.addEventListener("click", async () => {
+  document.addEventListener("click", async (e) => {
+    const quitBtn = e.target.closest(".quit-global-btn");
+    if (quitBtn) {
+      e.preventDefault();
       try {
         if (window.pywebview?.api?.quit_app) {
           await window.pywebview.api.quit_app();
         } else {
           window.close();
         }
-      } catch (e) {
-        console.error("Error closing:", e);
+      } catch (err) {
+        console.error("Erreur lors de la fermeture:", err);
       }
-    });
+    }
   });
 
   document.querySelectorAll(".menu-container").forEach((container) => {
-    const button = container.querySelector(".menu-button, #menu-button");
+    const button = container.querySelector(".menu-button");
     const menu = container.querySelector(".user-menu");
     if (button && menu) {
-      const newButton = button.cloneNode(true);
-      button.parentNode.replaceChild(newButton, button);
-      newButton.addEventListener("click", (event) => {
+      button.addEventListener("click", (event) => {
         event.stopPropagation();
         document.querySelectorAll(".user-menu").forEach((m) => {
           if (m !== menu) m.classList.add("hidden");
@@ -2183,8 +4876,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (themeBtn) {
       const currentTheme =
         document.documentElement.getAttribute("data-theme") || "light";
-      const newTheme = currentTheme === "dark" ? "light" : "dark";
-      applyTheme(newTheme);
+      applyTheme(currentTheme === "dark" ? "light" : "dark");
     }
   });
 
@@ -2224,25 +4916,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (label) {
         label.textContent = fileName;
         label.style.color = "var(--text-color)";
-      }
-      try {
-        await waitForApi();
-        await window.pywebview.api.open_database_path(filePath);
-        logUserAction(`Opening database : ${fileName}`);
-
-        const toggleChecked = document.getElementById(
-          "toggle-show-tables-list",
-        )?.checked;
-        if (toggleChecked) {
-          await loadDatabaseDetails(filePath);
-        } else {
-          const container = document.querySelector(
-            "#database-tables-container-existing",
-          );
-          if (container) container.classList.add("hidden");
-        }
-      } catch (err) {
-        console.error("Error opening database:", err);
+        label.style.fontWeight = "normal";
       }
     });
   }
@@ -2269,699 +4943,4 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     });
   }
-});
-
-// === GESTION DE LA LANGUE ===
-// === GESTION DE LA LANGUE ===
-let currentLanguage = "fr";
-
-// Traductions
-const translations = {
-  fr: {
-    welcome: "Bonjour",
-    dashboard: "Tableau de bord",
-    import_excel: "Importer un fichier Excel",
-    import_desc: "Convertir un fichier Excel en base de données.",
-    open_db: "Travailler avec une base existante",
-    open_desc: "Ouvrir et manipuler une base de données existante.",
-    home: "Accueil",
-    logout: "Se déconnecter",
-    quit: "Quitter",
-    theme: "Changer de thème",
-    language: "Langue",
-    french: "Français",
-    english: "English",
-    connected: "Connecté",
-    active_session: "Session active",
-    no_database: "Aucune base",
-    no_activity: "Aucune action récente",
-    database: "Base de données",
-    active_db: "Base active",
-    location: "Emplacement",
-    name: "Nom",
-    recent_actions: "Dernières actions",
-    activity: "Activité",
-    tools: "Outils de gestion",
-    find_duplicates: "Trouver les doublons",
-    clean_data: "Nettoyer les données",
-    manipulate: "Manipuler les données",
-    export_excel: "Exporter vers Excel",
-    select_file: "Sélectionner un fichier Excel",
-    no_file: "Aucun fichier sélectionné",
-    convert: "Convertir en base de données",
-    table_name: "Nom de la table dans la base",
-    columns: "Colonnes détectées",
-    sheet: "Feuille Excel",
-    results: "Résultats",
-    duplicates: "Doublons",
-    delete: "Supprimer",
-    save: "Enregistrer",
-    cancel: "Annuler",
-    export_pdf: "Exporter PDF",
-    select_all: "Tout sélectionner",
-    deselect_all: "Tout désélectionner",
-    expand: "Agrandir",
-    search: "Rechercher",
-    filter: "Filtrer les colonnes",
-    sql_queries: "Requêtes SQL",
-    execute: "Exécuter",
-    reset: "Réinitialiser",
-    results_count: "Nombre de résultats",
-    no_data: "Aucune donnée trouvée.",
-    select_table: "Veuillez sélectionner une table.",
-    loading: "Chargement...",
-    first_start: "Premier démarrage",
-    create_user: "Créer le premier utilisateur",
-    username: "Nom d'utilisateur",
-    password: "Mot de passe",
-    login: "Se connecter",
-    login_title: "Bienvenue",
-    login_desc: "Connectez-vous pour accéder à vos données.",
-    create_account: "Créer l'utilisateur",
-    setup_title: "Premier démarrage",
-    setup_desc: "Créez le premier utilisateur de l'application.",
-    all_columns: "Toutes les colonnes",
-    none: "Aucun",
-    target_column: "Colonne cible",
-    filter_value: "Valeur (optionnel)",
-    group_by: "Grouper par",
-    view_all: "Voir tout",
-    unique_values: "Valeurs uniques",
-    minimum: "Minimum",
-    maximum: "Maximum",
-    count: "Compter",
-    sum: "Somme",
-    average: "Moyenne",
-    search_label: "Rechercher",
-    group: "Grouper",
-    manipulation_tools: "Outils :",
-    explorer: "Explorateur",
-    available_dbs: "Bases de données disponibles",
-    select_db: "Sélectionnez une base de données existante",
-    show_content: "Afficher le contenu de la base",
-    administration: "Administration",
-    duplicate_results: "Résultats - Recherche de doublons",
-    select_table_first: "-- Sélectionnez une table d'abord --",
-    back: "Retour",
-    validate: "Valider",
-    no_duplicates: "Aucun doublon trouvé.",
-    duplicates_found: "doublon(s) trouvé(s)",
-    analysis_complete: "Analyse terminée",
-    analysis_cancelled: "Analyse annulée",
-    communication_error: "Erreur de communication",
-    select_db_first: "Veuillez sélectionner une base de données d'abord.",
-    file_not_found: "Fichier non trouvé",
-    export_success: "Exportation réussie",
-    export_error: "Erreur lors de l'exportation",
-    cleaning_complete: "Nettoyage terminé",
-    cleaning_error: "Erreur lors du nettoyage",
-    search_results: "résultat(s) trouvé(s)",
-    no_search_results: "Aucun résultat trouvé",
-    apply_filters: "Appliquer les filtres",
-    reset_filters: "Réinitialiser les filtres",
-    select_column: "Sélectionnez au moins une colonne.",
-    filters_applied: "Filtres appliqués",
-    filters_reset: "Filtres réinitialisés",
-    operation_executed: "Opération exécutée",
-    operation_error: "Erreur lors de l'opération",
-    form_reset: "Formulaire réinitialisé",
-    pdf_generated: "PDF généré avec succès",
-    pdf_error: "Erreur lors de la génération du PDF",
-    no_data_to_export: "Aucune donnée à exporter",
-    select_pdf_location: "Sélectionnez l'emplacement du PDF",
-    db_selected: "Base sélectionnée",
-    table_selected: "Table sélectionnée",
-    open_database: "Ouvrir la base de données",
-    db_opened: "Base ouverte",
-    db_closed: "Base fermée",
-    import_success: "Importation réussie",
-    import_error: "Erreur lors de l'importation",
-    importing: "Importation en cours...",
-    converting: "Conversion en base de données...",
-    conversion_complete: "Conversion terminée",
-    no_file_selected: "Aucun fichier sélectionné",
-    invalid_file: "Fichier invalide",
-    invalid_sheet: "Feuille invalide",
-    preview_error: "Erreur lors de l'aperçu",
-    columns_detected: "colonne(s) détectée(s)",
-    column: "Colonne",
-    unnamed_column: "Colonne sans nom",
-    table_created: "Table créée",
-    rows_imported: "lignes importées",
-    confirm_delete_duplicates: "Êtes-vous sûr de vouloir supprimer",
-    deleted_duplicates: "doublon(s) supprimé(s)",
-    save_duplicates: "Doublons enregistrés",
-    saving: "Enregistrement...",
-    select_algorithm: "Sélectionnez un algorithme",
-    algorithm_general: "Général (toutes les colonnes)",
-    algorithm_cin_nom: "CIN + NOM (recherche par similarité)",
-    run_analysis: "Lancer l'analyse",
-    analysis: "Analyse",
-    analyzing: "Analyse en cours...",
-    analyzing_table: "Analyse de la table",
-    analyzing_duplicates: "Analyse des doublons",
-    duplicate_detected: "Doublon détecté",
-    duplicate_type: "Type de doublon",
-    cin_identical: "CIN identique",
-    nom_geo: "Nom + géolocalisation",
-    general_dup: "Général",
-    reference: "Référence",
-    details: "Détails",
-    comparative_details: "Détails comparatifs",
-    duplicate: "Doublon",
-    original: "Original",
-    id: "ID",
-    table: "Table",
-    no_tables: "Aucune table trouvée",
-    select_table_to_view:
-      "Veuillez sélectionner une table pour afficher les données.",
-    db_name: "Nom de la base",
-    db_path: "Chemin de la base",
-    file_size: "Taille du fichier",
-    kb: "Ko",
-    mb: "Mo",
-    confirm_delete: "Supprimer définitivement",
-  },
-  en: {
-    welcome: "Hello",
-    dashboard: "Dashboard",
-    import_excel: "Import Excel File",
-    import_desc: "Convert an Excel file to a database.",
-    open_db: "Work with existing database",
-    open_desc: "Open and manipulate an existing database.",
-    home: "Home",
-    logout: "Log out",
-    quit: "Quit",
-    theme: "Change theme",
-    language: "Language",
-    french: "French",
-    english: "English",
-    connected: "Connected",
-    active_session: "Active session",
-    no_database: "No database",
-    no_activity: "No recent activity",
-    database: "Database",
-    active_db: "Active database",
-    location: "Location",
-    name: "Name",
-    recent_actions: "Recent actions",
-    activity: "Activity",
-    tools: "Management tools",
-    find_duplicates: "Find duplicates",
-    clean_data: "Clean data",
-    manipulate: "Manipulate data",
-    export_excel: "Export to Excel",
-    select_file: "Select Excel file",
-    no_file: "No file selected",
-    convert: "Convert to database",
-    table_name: "Table name in database",
-    columns: "Detected columns",
-    sheet: "Excel sheet",
-    results: "Results",
-    duplicates: "Duplicates",
-    delete: "Delete",
-    save: "Save",
-    cancel: "Cancel",
-    export_pdf: "Export PDF",
-    select_all: "Select all",
-    deselect_all: "Deselect all",
-    expand: "Expand",
-    search: "Search",
-    filter: "Filter columns",
-    sql_queries: "SQL Queries",
-    execute: "Execute",
-    reset: "Reset",
-    results_count: "Results count",
-    no_data: "No data found.",
-    select_table: "Please select a table.",
-    loading: "Loading...",
-    first_start: "First start",
-    create_user: "Create the first user",
-    username: "Username",
-    password: "Password",
-    login: "Log in",
-    login_title: "Welcome",
-    login_desc: "Log in to access your data.",
-    create_account: "Create user",
-    setup_title: "First start",
-    setup_desc: "Create the first user of the application.",
-    all_columns: "All columns",
-    none: "None",
-    target_column: "Target column",
-    filter_value: "Filter value (optional)",
-    group_by: "Group by",
-    view_all: "View all",
-    unique_values: "Unique values",
-    minimum: "Minimum",
-    maximum: "Maximum",
-    count: "Count",
-    sum: "Sum",
-    average: "Average",
-    search_label: "Search",
-    group: "Group",
-    manipulation_tools: "Tools :",
-    explorer: "Explorer",
-    available_dbs: "Available databases",
-    select_db: "Select an existing database",
-    show_content: "Show database content",
-    administration: "Administration",
-    duplicate_results: "Results - Duplicate search",
-    select_table_first: "-- Select a table first --",
-    back: "Back",
-    validate: "Validate",
-    no_duplicates: "No duplicates found.",
-    duplicates_found: "duplicate(s) found",
-    analysis_complete: "Analysis complete",
-    analysis_cancelled: "Analysis cancelled",
-    communication_error: "Communication error",
-    select_db_first: "Please select a database first.",
-    file_not_found: "File not found",
-    export_success: "Export successful",
-    export_error: "Export error",
-    cleaning_complete: "Cleaning complete",
-    cleaning_error: "Cleaning error",
-    search_results: "result(s) found",
-    no_search_results: "No results found",
-    apply_filters: "Apply filters",
-    reset_filters: "Reset filters",
-    select_column: "Select at least one column.",
-    filters_applied: "Filters applied",
-    filters_reset: "Filters reset",
-    operation_executed: "Operation executed",
-    operation_error: "Operation error",
-    form_reset: "Form reset",
-    pdf_generated: "PDF generated successfully",
-    pdf_error: "PDF generation error",
-    no_data_to_export: "No data to export",
-    select_pdf_location: "Select PDF location",
-    db_selected: "Database selected",
-    table_selected: "Table selected",
-    open_database: "Open database",
-    db_opened: "Database opened",
-    db_closed: "Database closed",
-    import_success: "Import successful",
-    import_error: "Import error",
-    importing: "Importing...",
-    converting: "Converting to database...",
-    conversion_complete: "Conversion complete",
-    no_file_selected: "No file selected",
-    invalid_file: "Invalid file",
-    invalid_sheet: "Invalid sheet",
-    preview_error: "Preview error",
-    columns_detected: "column(s) detected",
-    column: "Column",
-    unnamed_column: "Unnamed column",
-    table_created: "Table created",
-    rows_imported: "rows imported",
-    confirm_delete_duplicates: "Are you sure you want to delete",
-    deleted_duplicates: "duplicate(s) deleted",
-    save_duplicates: "Duplicates saved",
-    saving: "Saving...",
-    select_algorithm: "Select an algorithm",
-    algorithm_general: "General (all columns)",
-    algorithm_cin_nom: "CIN + NOM (similarity search)",
-    run_analysis: "Run analysis",
-    analysis: "Analysis",
-    analyzing: "Analyzing...",
-    analyzing_table: "Analyzing table",
-    analyzing_duplicates: "Analyzing duplicates",
-    duplicate_detected: "Duplicate detected",
-    duplicate_type: "Duplicate type",
-    cin_identical: "Identical CIN",
-    nom_geo: "Name + geolocation",
-    general_dup: "General",
-    reference: "Reference",
-    details: "Details",
-    comparative_details: "Comparative details",
-    duplicate: "Duplicate",
-    original: "Original",
-    id: "ID",
-    table: "Table",
-    no_tables: "No tables found",
-    select_table_to_view: "Please select a table to view data.",
-    db_name: "Database name",
-    db_path: "Database path",
-    file_size: "File size",
-    kb: "KB",
-    mb: "MB",
-    confirm_delete: "Permanently delete",
-  },
-};
-
-function getTranslation(key) {
-  return translations[currentLanguage]?.[key] || key;
-}
-
-function setLanguage(lang) {
-  currentLanguage = lang;
-  localStorage.setItem("app_language", lang);
-
-  // Mettre à jour les boutons de langue
-  document.querySelectorAll(".language-btn").forEach(function (btn) {
-    btn.classList.toggle("active", btn.dataset.lang === lang);
-  });
-
-  // Mettre à jour le label dans le menu
-  document.querySelectorAll(".menu-lang-label").forEach(function (el) {
-    el.textContent = lang === "fr" ? "Français" : "English";
-  });
-  var menuLangLabel = document.getElementById("menu-lang-label");
-  if (menuLangLabel) {
-    menuLangLabel.textContent = lang === "fr" ? "Français" : "English";
-  }
-
-  // Mettre à jour l'interface
-  updateUITexts();
-}
-
-function updateUITexts() {
-  // Dashboard
-  var welcomeMsg = document.querySelector("#welcome-message");
-  if (welcomeMsg) welcomeMsg.textContent = getTranslation("welcome");
-
-  var btnImportTitle = document.querySelector("#btn-import-title");
-  if (btnImportTitle)
-    btnImportTitle.textContent = getTranslation("import_excel");
-
-  var btnImportDesc = document.querySelector("#btn-import-desc");
-  if (btnImportDesc) btnImportDesc.textContent = getTranslation("import_desc");
-
-  var btnOpenTitle = document.querySelector("#btn-open-title");
-  if (btnOpenTitle) btnOpenTitle.textContent = getTranslation("open_db");
-
-  var btnOpenDesc = document.querySelector("#btn-open-desc");
-  if (btnOpenDesc) btnOpenDesc.textContent = getTranslation("open_desc");
-
-  // Topbar
-  document.querySelectorAll(".btn-home").forEach(function (el) {
-    el.innerHTML = '<i class="fas fa-home"></i> ' + getTranslation("home");
-  });
-
-  // Menu
-  document.querySelectorAll(".logout-global-btn").forEach(function (el) {
-    el.innerHTML =
-      '<i class="fas fa-sign-out-alt"></i> ' + getTranslation("logout");
-  });
-  document.querySelectorAll(".quit-global-btn").forEach(function (el) {
-    el.innerHTML = '<i class="fas fa-power-off"></i> ' + getTranslation("quit");
-  });
-  document.querySelectorAll(".theme-global-btn").forEach(function (el) {
-    el.innerHTML = '<i class="fas fa-adjust"></i> ' + getTranslation("theme");
-  });
-
-  // Setup
-  var setupTitle = document.querySelector("#setup-title");
-  if (setupTitle) setupTitle.textContent = getTranslation("setup_title");
-
-  var setupDesc = document.querySelector("#setup-view p");
-  if (setupDesc) setupDesc.textContent = getTranslation("setup_desc");
-
-  var setupPseudo = document.querySelector("#setup-pseudo");
-  if (setupPseudo) setupPseudo.placeholder = getTranslation("username");
-
-  var setupPassword = document.querySelector("#setup-password");
-  if (setupPassword) setupPassword.placeholder = getTranslation("password");
-
-  var setupBtn = document.querySelector('#setup-view button[type="submit"]');
-  if (setupBtn) setupBtn.textContent = getTranslation("create_account");
-
-  // Login
-  var loginTitle = document.querySelector("#login-title");
-  if (loginTitle) loginTitle.textContent = getTranslation("login_title");
-
-  var loginDesc = document.querySelector("#login-view p");
-  if (loginDesc) loginDesc.textContent = getTranslation("login_desc");
-
-  var loginPseudo = document.querySelector("#login-pseudo");
-  if (loginPseudo) loginPseudo.placeholder = getTranslation("username");
-
-  var loginPassword = document.querySelector("#login-password");
-  if (loginPassword) loginPassword.placeholder = getTranslation("password");
-
-  var loginBtn = document.querySelector('#login-view button[type="submit"]');
-  if (loginBtn) loginBtn.textContent = getTranslation("login");
-
-  // Existing DB
-  var existingTitle = document.querySelector("#existing-db-title");
-  if (existingTitle)
-    existingTitle.textContent = getTranslation("available_dbs");
-
-  var existingDesc = document.querySelector(
-    "#existing-db-view .dashboard-heading p",
-  );
-  if (existingDesc) existingDesc.textContent = getTranslation("select_db");
-
-  var toggleLabel = document.querySelector("#toggle-show-tables-list");
-  if (toggleLabel && toggleLabel.nextElementSibling) {
-    toggleLabel.nextElementSibling.textContent = getTranslation("show_content");
-  }
-
-  var toolsTitle = document.querySelector(
-    "#db-actions-panel .section-heading h2",
-  );
-  if (toolsTitle) toolsTitle.textContent = getTranslation("tools");
-
-  // Admin buttons
-  var btnFindDups = document.querySelector(
-    "#btn-check-duplicates .feature-title",
-  );
-  if (btnFindDups)
-    btnFindDups.textContent = "1. " + getTranslation("find_duplicates");
-
-  var btnClean = document.querySelector("#btn-clean-db .feature-title");
-  if (btnClean) btnClean.textContent = "2. " + getTranslation("clean_data");
-
-  var btnManipulate = document.querySelector(
-    "#btn-manipulate-db .feature-title",
-  );
-  if (btnManipulate)
-    btnManipulate.textContent = "3. " + getTranslation("manipulate");
-
-  var btnExport = document.querySelector("#btn-export-excel .feature-title");
-  if (btnExport) btnExport.textContent = "4. " + getTranslation("export_excel");
-
-  // Duplicate results
-  var resultsTitle = document.querySelector("#results-title");
-  if (resultsTitle) {
-    resultsTitle.innerHTML =
-      '<i class="fas fa-clone" style="color: var(--primary, #4f46e5);"></i> ' +
-      getTranslation("duplicate_results");
-  }
-
-  var btnSelectAll = document.querySelector("#btn-select-all-dups");
-  if (btnSelectAll)
-    btnSelectAll.innerHTML =
-      '<i class="fas fa-check-double"></i> ' + getTranslation("select_all");
-
-  var btnDelete = document.querySelector("#btn-delete-selected-dups");
-  if (btnDelete)
-    btnDelete.innerHTML =
-      '<i class="fas fa-trash"></i> ' + getTranslation("delete");
-
-  var btnSave = document.querySelector("#btn-save-dups");
-  if (btnSave)
-    btnSave.innerHTML = '<i class="fas fa-save"></i> ' + getTranslation("save");
-
-  var btnCancel = document.querySelector("#btn-cancel-dups");
-  if (btnCancel)
-    btnCancel.innerHTML =
-      '<i class="fas fa-times"></i> ' + getTranslation("cancel");
-
-  var btnExportPdf = document.querySelector("#btn-export-dups-pdf");
-  if (btnExportPdf)
-    btnExportPdf.innerHTML =
-      '<i class="fas fa-file-pdf"></i> ' + getTranslation("export_pdf");
-
-  var btnExpand = document.querySelector("#btn-expand-dups");
-  if (btnExpand)
-    btnExpand.innerHTML =
-      '<i class="fas fa-expand"></i> ' + getTranslation("expand");
-
-  // Manipulate
-  var manipulateTitle = document.querySelector("#manipulate-title");
-  if (manipulateTitle)
-    manipulateTitle.textContent = getTranslation("manipulate");
-
-  var manipulateDesc = document.querySelector(
-    "#manipulate-view .dashboard-heading p",
-  );
-  if (manipulateDesc)
-    manipulateDesc.textContent = getTranslation("select_table");
-
-  var btnSelectTable = document.querySelector("#btn-manipulate-select-table");
-  if (btnSelectTable)
-    btnSelectTable.innerHTML =
-      '<i class="fas fa-check"></i> ' + getTranslation("validate");
-
-  var btnSearch = document.querySelector("#btn-manipulate-search");
-  if (btnSearch)
-    btnSearch.innerHTML =
-      '<i class="fas fa-search"></i> ' + getTranslation("search");
-
-  var btnFilters = document.querySelector("#btn-manipulate-filters");
-  if (btnFilters)
-    btnFilters.innerHTML =
-      '<i class="fas fa-filter"></i> ' + getTranslation("filter");
-
-  var btnOperations = document.querySelector("#btn-manipulate-operations");
-  if (btnOperations)
-    btnOperations.innerHTML =
-      '<i class="fas fa-cogs"></i> ' + getTranslation("sql_queries");
-
-  var btnExecuteSearch = document.querySelector("#btn-execute-search");
-  if (btnExecuteSearch)
-    btnExecuteSearch.innerHTML =
-      '<i class="fas fa-search"></i> ' + getTranslation("search");
-
-  var btnExecuteOp = document.querySelector("#btn-execute-operation");
-  if (btnExecuteOp)
-    btnExecuteOp.innerHTML =
-      '<i class="fas fa-play"></i> ' + getTranslation("execute");
-
-  var btnResetOp = document.querySelector("#btn-reset-operation");
-  if (btnResetOp)
-    btnResetOp.innerHTML =
-      '<i class="fas fa-undo"></i> ' + getTranslation("reset");
-
-  var btnExpandManipulate = document.querySelector("#btn-expand-manipulate");
-  if (btnExpandManipulate)
-    btnExpandManipulate.innerHTML =
-      '<i class="fas fa-expand"></i> ' + getTranslation("expand");
-
-  // SQL operation buttons
-  var opBtns = document.querySelectorAll(".op-btn");
-  var opBtnLabels = {
-    SELECT_ALL: "view_all",
-    DISTINCT: "unique_values",
-    MIN: "minimum",
-    MAX: "maximum",
-    COUNT: "count",
-    SUM: "sum",
-    AVG: "average",
-    WHERE_LIKE: "search_label",
-    GROUP_BY: "group",
-  };
-  opBtns.forEach(function (btn) {
-    var opType = btn.getAttribute("data-op");
-    if (opType && opBtnLabels[opType]) {
-      btn.textContent = getTranslation(opBtnLabels[opType]);
-    }
-  });
-
-  // Labels
-  var tableNameLabel = document.querySelector('label[for="excel-table-name"]');
-  if (tableNameLabel) tableNameLabel.textContent = getTranslation("table_name");
-
-  var sheetLabel = document.querySelector('label[for="excel-sheet-select"]');
-  if (sheetLabel) sheetLabel.textContent = getTranslation("sheet");
-
-  var dbFileLabel = document.querySelector('label[for="db-file-select"]');
-  if (dbFileLabel) dbFileLabel.textContent = getTranslation("available_dbs");
-
-  var attrLabel = document.querySelector('label[for="op-attribute-select"]');
-  if (attrLabel) attrLabel.textContent = getTranslation("target_column");
-
-  var groupLabel = document.querySelector('label[for="op-groupby-select"]');
-  if (groupLabel) groupLabel.textContent = getTranslation("group_by");
-
-  var tableSelectLabel = document.querySelector(
-    'label[for="manipulate-table-select"]',
-  );
-  if (tableSelectLabel)
-    tableSelectLabel.textContent = getTranslation("select_table");
-
-  // Import Excel
-  var importTitle = document.querySelector("#excel-import-title");
-  if (importTitle) importTitle.textContent = getTranslation("import_excel");
-
-  var selectFileBtn = document.querySelector("#select-excel-file-button");
-  if (selectFileBtn)
-    selectFileBtn.innerHTML =
-      '<i class="fas fa-file-excel"></i> ' + getTranslation("select_file");
-
-  var selectedFile = document.querySelector("#selected-excel-file");
-  if (
-    selectedFile &&
-    !selectedFile.textContent.includes("fichier sélectionné")
-  ) {
-    // Ne pas écraser le nom du fichier
-  }
-
-  var convertBtn = document.querySelector("#import-excel-into-database-button");
-  if (convertBtn)
-    convertBtn.innerHTML =
-      '<i class="fas fa-database"></i> ' + getTranslation("convert");
-
-  var backBtn = document.querySelector("#back-to-dashboard-button");
-  if (backBtn) backBtn.textContent = getTranslation("back");
-
-  // Results count label
-  var resultsCountLabel = document.querySelector(
-    ".database-status-section .section-heading h3",
-  );
-  if (resultsCountLabel)
-    resultsCountLabel.textContent = getTranslation("results");
-
-  // Manipulate results
-  var manipulateResultsTitle = document.querySelector(
-    "#manipulate-view .database-status-section h3",
-  );
-  if (manipulateResultsTitle)
-    manipulateResultsTitle.textContent = getTranslation("results");
-
-  var responseCount = document.querySelector("#manipulate-response-count");
-  if (responseCount) responseCount.textContent = "0";
-
-  // Search input placeholder
-  var searchInput = document.querySelector("#manipulate-search-input");
-  if (searchInput) searchInput.placeholder = getTranslation("search");
-
-  var valueInput = document.querySelector("#op-value-input");
-  if (valueInput) valueInput.placeholder = getTranslation("filter_value");
-
-  var attrSelect = document.querySelector(
-    '#op-attribute-select option[value=""]',
-  );
-  if (attrSelect) attrSelect.textContent = getTranslation("select_table_first");
-
-  var groupSelect = document.querySelector(
-    '#op-groupby-select option[value=""]',
-  );
-  if (groupSelect) groupSelect.textContent = getTranslation("none");
-
-  // No data message
-  var noDataMsg = document.querySelector(
-    "#manipulate-results-table-container p",
-  );
-  if (noDataMsg && !noDataMsg.querySelector("table")) {
-    noDataMsg.textContent = getTranslation("select_table_to_view");
-  }
-}
-
-// === INITIALISATION DE LA LANGUE ===
-function initLanguage() {
-  var savedLang = localStorage.getItem("app_language") || "fr";
-  setLanguage(savedLang);
-}
-
-// Ajouter les écouteurs d'événements pour les boutons de langue
-document.addEventListener("DOMContentLoaded", function () {
-  // Initialiser la langue
-  initLanguage();
-
-  // Écouteurs pour les boutons de langue
-  document.querySelectorAll(".language-btn").forEach(function (btn) {
-    btn.addEventListener("click", function () {
-      var lang = this.dataset.lang;
-      setLanguage(lang);
-    });
-  });
-
-  // Écouteurs pour les boutons de langue dans le menu
-  document.querySelectorAll(".language-menu-btn").forEach(function (btn) {
-    btn.addEventListener("click", function () {
-      var newLang = currentLanguage === "fr" ? "en" : "fr";
-      setLanguage(newLang);
-    });
-  });
 });

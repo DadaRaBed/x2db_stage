@@ -7,3 +7,11 @@ Ouverture de la base : hello.db
 [ERREUR IMPORT] Feuille 'FDA-REALISE': Error binding parameter 24: type 'Timestamp' is not supported
 [ERREUR IMPORT] Feuille 'COUPLAGE 2025': duplicate column name: filiere
 [ERREUR IMPORT] Feuille 'COUPLAGE 2019_2026': duplicate column name: filiere
+[IMPORT ERROR] Sheet 'CEP 2026': Error binding parameter 22: type 'Timestamp' is not supported
+[IMPORT ERROR] Sheet 'MCV REMONTE 2025': Error binding parameter 23: type 'Timestamp' is not supported
+[IMPORT ERROR] Sheet 'MCV_REALISE': Error binding parameter 23: type 'Timestamp' is not supported
+[IMPORT ERROR] Sheet 'LABOUR': Error binding parameter 26: type 'Timestamp' is not supported
+[IMPORT ERROR] Sheet 'FDA-REALISE ': Error binding parameter 22: type 'Timestamp' is not supported
+[IMPORT ERROR] Sheet 'COUPLAGE 2025 ': duplicate column name: filiere
+[IMPORT ERROR] Sheet 'COUPLAGE 2019_2025': duplicate column name: filiere
+[IMPORT ERROR] Sheet 'COUPLAGE 2026': duplicate column name: filiere
