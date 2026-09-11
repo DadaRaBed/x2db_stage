@@ -1,13 +1,52 @@
-# Core dependencies
-python>=3.10
-pywebview>=5.3.2
-pandas>=2.0.3
-openpyxl>=3.1.2
-sqlite3>=3.44.0
-bcrypt>=4.1.1
-google-api-python-client>=2.100.0
-google-auth-httplib2>=0.1.0
-google-auth-oauthlib>=1.0.0
-pytest>=7.4.0
-pytest-cov>=4.1.0
-python-dotenv>=1.0.0
+# ============================================================
+# xl2db - Expert Edition
+# Dependances Python
+# ============================================================
+# Installation :
+#   pip install -r requirements.txt
+# ============================================================
+
+# --- Interface graphique et webview ---
+pywebview>=5.0
+qtpy>=2.4.0
+
+# --- Manipulation de donnees ---
+pandas>=2.0.0
+numpy>=1.24.0
+
+# --- Excel ---
+openpyxl>=3.1.0
+xlrd>=2.0.1
+xlsxwriter>=3.1.0
+
+# --- PDF (optionnel - fallback HTML si absent) ---
+# weasyprint>=60.0
+# pdfkit>=1.0.0
+
+# --- Securite (hashage des mots de passe) ---
+bcrypt>=4.0.0
+# OU si vous utilisez hashlib (aucune dependance externe requise)
+
+# --- Icones (conversion PNG -> ICO pour le build) ---
+Pillow>=10.0.0
+
+# --- Build (EXE Windows / binaire Linux/macOS) ---
+pyinstaller>=6.0.0
+
+# ============================================================
+# DEPENDANCES SYSTEME (a installer manuellement)
+# ============================================================
+# Windows :
+#   pip install pywebview[cef]
+#   OU utiliser Edge Chromium (deja present sur Windows 10/11)
+#
+# Linux (Debian/Ubuntu) :
+#   sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-3.0
+#   sudo apt install gir1.2-webkit2-4.1
+#
+# Linux (si vous voulez utiliser Qt) :
+#   sudo apt install python3-pyqt5 python3-pyqt5.qtwebengine
+#   sudo apt install python3-pyqt5.qtwebchannel
+#
+# macOS :
+#   brew install gtk+3 webkit2gtk

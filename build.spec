@@ -1,12 +1,12 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-Fichier de configuration PyInstaller pour Data Manager - Expert Edition.
+Fichier de configuration PyInstaller pour xl2db - Expert Edition.
 
 Utilisation :
-    pyinstaller build.spec              # mode par defaut (onedir)
+    pyinstaller build.spec              # mode onedir (recommande)
     pyinstaller build.spec -- --onefile # mode onefile (un seul .exe)
 
-Le resultat se trouve dans le dossier dist/.
+Le resultat se trouve dans dist/.
 """
 
 import sys
@@ -18,25 +18,16 @@ from pathlib import Path
 # ============================================================
 PROJECT_ROOT = Path(SPECPATH).resolve()
 MAIN_SCRIPT = str(PROJECT_ROOT / "app.py")
-APP_NAME = "DataManager"
+APP_NAME = "xl2db"
 
 # ============================================================
 # ICONE DE L'APPLICATION
 # ============================================================
-# PyInstaller necessite un .ico sur Windows et un .icns sur macOS.
-# Convertissez votre PNG avec Pillow (script convert_icon.py) :
-#   from PIL import Image
-#   Image.open("assets/icons/icon.png").save(
-#       "assets/icons/icon.ico", format="ICO",
-#       sizes=[(16,16),(32,32),(48,48),(64,64),(128,128),(256,256)]
-#   )
-
 if sys.platform == "win32":
     ICON_PATH = str(PROJECT_ROOT / "assets" / "icons" / "icon.ico")
 elif sys.platform == "darwin":
     ICON_PATH = str(PROJECT_ROOT / "assets" / "icons" / "icon.icns")
 else:
-    # Linux : PyInstaller ignore l'icone de l'executable
     ICON_PATH = str(PROJECT_ROOT / "assets" / "icons" / "icon.png")
 
 if not Path(ICON_PATH).exists():
@@ -123,6 +114,9 @@ hiddenimports = [
     "weasyprint",
     "pdfkit",
 
+    # --- Securite ---
+    "bcrypt",
+
     # --- Autres ---
     "sqlite3",
     "json",
@@ -135,10 +129,19 @@ hiddenimports = [
     "os",
     "sys",
     "time",
+    "smtplib",
+    "email",
+    "email.mime.text",
+    "email.mime.multipart",
+    "urllib",
+    "urllib.request",
+    "urllib.error",
+    "urllib.parse",
+    "webbrowser",
 ]
 
 # ============================================================
-# EXCLUSIONS (pour reduire la taille de l'executable)
+# EXCLUSIONS (pour reduire la taille)
 # ============================================================
 excludes = [
     "pytest",
@@ -148,7 +151,6 @@ excludes = [
     "tests",
 
     "tkinter",
-    "PyQt5",
     "PyQt6",
     "PySide2",
     "PySide6",
@@ -205,7 +207,6 @@ pyz = PYZ(a.pure, a.zipped_data, cipher=None)
 # CONSTRUCTION DE L'EXECUTABLE
 # ============================================================
 if ONE_FILE_MODE:
-    # --- Mode ONEFILE : un seul fichier .exe ---
     exe = EXE(
         pyz,
         a.scripts,
@@ -229,7 +230,6 @@ if ONE_FILE_MODE:
         icon=ICON_PATH,
     )
 else:
-    # --- Mode ONEDIR : dossier dist/DataManager/ ---
     exe = EXE(
         pyz,
         a.scripts,
@@ -268,7 +268,7 @@ else:
 #         coll if not ONE_FILE_MODE else exe,
 #         name=f"{APP_NAME}.app",
 #         icon=ICON_PATH,
-#         bundle_identifier=f"com.datamanager.{APP_NAME.lower()}",
+#         bundle_identifier=f"com.datarabed.{APP_NAME}",
 #         info_plist={
 #             "CFBundleName": APP_NAME,
 #             "CFBundleDisplayName": APP_NAME,
