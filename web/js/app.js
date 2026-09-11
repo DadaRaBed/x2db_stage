@@ -66,10 +66,8 @@ let createDbExcelPath = "";
 let createDbExcelSheets = [];
 let createDbSelectedSheet = "";
 
-// Historique de navigation (pour le bouton Precedent)
 let navigationHistory = [];
 
-// Attributs a filtrer
 const FILTER_ATTRIBUTES = [
   "pole_de_developpement",
   "podev",
@@ -86,8 +84,9 @@ const FILTER_ATTRIBUTES = [
   "observation",
 ];
 
-// Filtres actifs par valeur
 window._activeValueFilters = {};
+
+let appInfoCache = null;
 
 // ============================================
 // FONCTIONS GLOBALES
@@ -114,7 +113,6 @@ function goBack() {
     goToDashboard();
     return;
   }
-
   navigationHistory.pop();
   const previousView = navigationHistory[navigationHistory.length - 1];
 
@@ -210,14 +208,14 @@ function showNotificationWithProgress(message, percentage, success = true) {
     : "notification notification-error";
   notif.style.display = "block";
   notif.innerHTML = `
-        <div style="font-weight: bold; margin-bottom: 4px;">${escapeHtml(message)}</div>
-        <div style="display: flex; justify-content: space-between; font-size: 0.85rem; opacity: 0.9; margin-bottom: 4px;">
-            <span>Progression : ${Math.round(percentage)}%</span>
-        </div>
-        <div style="width: 100%; background: rgba(255,255,255,0.3); height: 6px; border-radius: 3px; overflow: hidden;">
-            <div style="width: ${Math.min(100, percentage)}%; background: #ffffff; height: 100%; transition: width 0.2s ease;"></div>
-        </div>
-    `;
+    <div style="font-weight: bold; margin-bottom: 4px;">${escapeHtml(message)}</div>
+    <div style="display: flex; justify-content: space-between; font-size: 0.85rem; opacity: 0.9; margin-bottom: 4px;">
+      <span>Progression : ${Math.round(percentage)}%</span>
+    </div>
+    <div style="width: 100%; background: rgba(255,255,255,0.3); height: 6px; border-radius: 3px; overflow: hidden;">
+      <div style="width: ${Math.min(100, percentage)}%; background: #ffffff; height: 100%; transition: width 0.2s ease;"></div>
+    </div>
+  `;
 
   if (percentage >= 100) {
     setTimeout(() => {
@@ -352,7 +350,6 @@ function updateTerminateButtonVisibility() {
     document.getElementById("btn-terminate-database-duplicates"),
     document.getElementById("btn-terminate-database-manipulate"),
   ];
-
   buttons.forEach((btn) => {
     if (btn) {
       btn.style.display = isDbOpen ? "inline-flex" : "none";
@@ -371,9 +368,7 @@ function showDashboard(user) {
   currentLoggedInUser = user;
   window.lastLoggedInUser = user;
   sessionStorage.setItem("session_active", "true");
-
   navigationHistory = ["dashboard"];
-
   showView(dashboardView);
 
   const pseudo = user.pseudo || "";
@@ -395,22 +390,19 @@ function showDashboard(user) {
 
   refreshDatabaseStatus();
   loadUserActivities();
+  updateFooterVersion();
 }
 
 function goToDashboard() {
   saveCurrentDbState();
   navigationHistory = ["dashboard"];
-
   if (window.lastLoggedInUser) {
     showDashboard(window.lastLoggedInUser);
   } else {
     showView(dashboardView);
     refreshDatabaseStatus();
   }
-
-  setTimeout(() => {
-    restoreDbState();
-  }, 100);
+  setTimeout(() => restoreDbState(), 100);
 }
 
 function goToExistingDb() {
@@ -419,10 +411,7 @@ function goToExistingDb() {
   showView(existingDbView);
   loadDataDirectoryDatabases();
   updateTerminateButtonVisibility();
-
-  setTimeout(() => {
-    restoreDbState();
-  }, 200);
+  setTimeout(() => restoreDbState(), 200);
 }
 
 function goToDuplicates() {
@@ -444,13 +433,10 @@ function resetDuplicateView() {
 
   const resultsContainer = document.getElementById("dup-results-container");
   if (resultsContainer) resultsContainer.classList.add("hidden");
-
   const resultsContent = document.getElementById("db-results-content");
   if (resultsContent) resultsContent.innerHTML = "";
-
   const countBadge = document.getElementById("dup-results-count");
   if (countBadge) countBadge.textContent = "0";
-
   const statusDiv = document.getElementById("dup-scan-status");
   if (statusDiv)
     statusDiv.textContent =
@@ -466,7 +452,6 @@ async function deleteSelectedDatabase() {
     showNotification("Veuillez d'abord selectionner une base.", false);
     return;
   }
-
   const dbPath = selectEl.value;
   const fileName = selectEl.options[selectEl.selectedIndex]?.text || dbPath;
 
@@ -476,29 +461,23 @@ async function deleteSelectedDatabase() {
         `Voulez-vous vraiment supprimer la base :\n"${fileName}" ?\n\n` +
         `Cette action est IRREVERSIBLE.\nToutes les tables et donnees seront perdues.`,
     )
-  ) {
+  )
     return;
-  }
 
   try {
     await waitForApi();
-
     const openedPath = sessionStorage.getItem("current_db_path");
     if (openedPath && openedPath === dbPath && isDbOpen) {
       try {
         await window.pywebview.api.terminate_database();
-      } catch (e) {
-        console.warn("Erreur fermeture base avant suppression:", e);
-      }
+      } catch (e) {}
       isDbOpen = false;
       currentDbPath = null;
       sessionStorage.removeItem("current_db_path");
       sessionStorage.removeItem("current_db_name");
       updateTerminateButtonVisibility();
-
       const actionsPanel = document.getElementById("db-actions-panel");
       if (actionsPanel) actionsPanel.classList.add("hidden");
-
       const tablesContainer = document.getElementById(
         "database-tables-container-existing",
       );
@@ -509,15 +488,12 @@ async function deleteSelectedDatabase() {
     }
 
     showGlobalProgress(30, true);
-
     const result = await window.pywebview.api.delete_database(dbPath);
-
     showGlobalProgress(100, true);
 
     if (result && result.success) {
       showNotification(result.message || "Base supprimee avec succes.", true);
       logUserAction(`Suppression de la base : ${result.db_name || fileName}`);
-
       selectEl.value = "";
       const label = document.getElementById("selected-db-path-label");
       if (label) {
@@ -547,28 +523,23 @@ async function deleteSelectedTable(tableName) {
     showNotification("Aucune table a supprimer.", false);
     return;
   }
-
   if (
     !confirm(
       `ATTENTION : Suppression definitive\n\n` +
         `Voulez-vous vraiment supprimer la table :\n"${tableName}" ?\n\n` +
         `Toutes les donnees de cette table seront perdues.\nCette action est IRREVERSIBLE.`,
     )
-  ) {
+  )
     return;
-  }
 
   try {
     await waitForApi();
     const activeDbPath = sessionStorage.getItem("current_db_path");
-
     showGlobalProgress(30, true);
-
     const result = await window.pywebview.api.delete_table(
       tableName,
       activeDbPath,
     );
-
     showGlobalProgress(100, true);
 
     if (result && result.success) {
@@ -577,7 +548,6 @@ async function deleteSelectedTable(tableName) {
         true,
       );
       logUserAction(`Suppression de la table : ${tableName}`);
-
       if (currentManipulateTable === tableName) {
         currentManipulateTable = "";
         currentManipulateData = [];
@@ -591,14 +561,12 @@ async function deleteSelectedTable(tableName) {
         }
         await loadManipulateTables();
       }
-
       const toggleChecked = document.getElementById(
         "toggle-show-tables-list",
       )?.checked;
       if (toggleChecked && activeDbPath) {
         await loadDatabaseDetails(activeDbPath);
       }
-
       await loadDuplicateTableFilter();
     } else {
       showNotification(
@@ -620,14 +588,12 @@ async function terminateDatabase() {
     showNotification("Aucune base de donnees n'est ouverte.", false);
     return;
   }
-
   if (
     !confirm(
       "Voulez-vous vraiment terminer l'utilisation de cette base de donnees ?\n\nVous pourrez en ouvrir une autre apres.",
     )
-  ) {
+  )
     return;
-  }
 
   try {
     await waitForApi();
@@ -636,22 +602,17 @@ async function terminateDatabase() {
     if (result && result.success) {
       isDbOpen = false;
       currentDbPath = null;
-
       const label = document.getElementById("selected-db-path-label");
       if (label) {
         label.textContent = "Aucune base selectionnee";
         label.style.color = "var(--text-color, gray)";
         label.style.fontWeight = "normal";
       }
-
       const selectEl = document.getElementById("db-file-select");
       if (selectEl) selectEl.value = "";
-
       const actionsPanel = document.getElementById("db-actions-panel");
       if (actionsPanel) actionsPanel.classList.add("hidden");
-
       updateTerminateButtonVisibility();
-
       const tablesContainer = document.getElementById(
         "database-tables-container-existing",
       );
@@ -659,7 +620,6 @@ async function terminateDatabase() {
         tablesContainer.innerHTML = "";
         tablesContainer.classList.add("hidden");
       }
-
       const resultsContainer = document.getElementById("dup-results-container");
       if (resultsContainer) resultsContainer.classList.add("hidden");
 
@@ -699,32 +659,26 @@ async function logoutUser() {
       isDbOpen = false;
       navigationHistory = [];
 
-      document.querySelectorAll(".user-menu").forEach((menu) => {
-        menu.classList.add("hidden");
-      });
-      document.querySelectorAll(".menu-button").forEach((btn) => {
-        btn.setAttribute("aria-expanded", "false");
-      });
-
+      document
+        .querySelectorAll(".user-menu")
+        .forEach((menu) => menu.classList.add("hidden"));
+      document
+        .querySelectorAll(".menu-button")
+        .forEach((btn) => btn.setAttribute("aria-expanded", "false"));
       updateTerminateButtonVisibility();
 
       showView(loginView);
       showNotification("Deconnexion reussie.", true);
     } else {
       const errorType = result?.error_type;
-
       if (errorType === "database_still_open") {
         showNotification(
-          "Une base de donnees est encore ouverte. Cliquez sur le bouton 'Terminer' pour la fermer avant de vous deconnecter.",
+          "Une base de donnees est encore ouverte. Cliquez sur 'Terminer' avant de vous deconnecter.",
           false,
         );
-
         setTimeout(() => {
           alert(
-            "Impossible de se deconnecter\n\n" +
-              "Une base de donnees est encore ouverte.\n\n" +
-              "Veuillez cliquer sur le bouton orange 'Terminer la base' " +
-              "pour fermer la base de donnees avant de vous deconnecter.",
+            "Impossible de se deconnecter\n\nUne base de donnees est encore ouverte.\n\nVeuillez cliquer sur 'Terminer la base' pour fermer avant de vous deconnecter.",
           );
         }, 100);
       } else if (errorType === "operation_in_progress") {
@@ -732,14 +686,6 @@ async function logoutUser() {
           "Une operation est en cours. Veuillez patienter avant de vous deconnecter.",
           false,
         );
-
-        setTimeout(() => {
-          alert(
-            "Impossible de se deconnecter\n\n" +
-              "Une operation est actuellement en cours sur la base de donnees.\n\n" +
-              "Veuillez attendre la fin de l'operation avant de vous deconnecter.",
-          );
-        }, 100);
       } else {
         showNotification(
           result?.message || "Erreur lors de la deconnexion.",
@@ -891,7 +837,6 @@ async function loadExcelPreview(sheetName) {
     excelPreviewContainer?.classList.add("hidden");
     return;
   }
-
   if (!selectedExcelFilePath || !sheetName) return;
   try {
     const result = await window.pywebview.api.preview_excel_sheet(
@@ -926,7 +871,6 @@ function renderExcelPreview(headers) {
     excelPreviewContainer.classList.add("hidden");
     return;
   }
-
   excelPreview.replaceChildren();
   excelPreviewContainer.classList.remove("hidden");
   let headersArray = headers;
@@ -1061,28 +1005,21 @@ function resetCreateDbView() {
   createDbExcelPath = "";
   createDbExcelSheets = [];
   createDbSelectedSheet = "";
-
   const fileLabel = document.getElementById("create-db-selected-file");
   if (fileLabel) fileLabel.textContent = "Aucun fichier selectionne";
-
   const dbNameInput = document.getElementById("create-db-name");
   if (dbNameInput) dbNameInput.value = "";
-
   const tableNameInput = document.getElementById("create-db-table-name");
   if (tableNameInput) tableNameInput.value = "donnees";
-
   const sheetContainer = document.getElementById("create-db-sheet-container");
   if (sheetContainer) sheetContainer.classList.add("hidden");
-
   const sheetSelect = document.getElementById("create-db-sheet-select");
   if (sheetSelect) {
     sheetSelect.innerHTML =
       '<option value="">Selectionnez une feuille</option>';
   }
-
   const messageEl = document.getElementById("create-db-message");
   if (messageEl) messageEl.textContent = "";
-
   const exportSection = document.getElementById("create-db-export-section");
   if (exportSection) exportSection.classList.add("hidden");
 }
@@ -1100,7 +1037,6 @@ async function selectCreateDbExcelFile() {
       }
       return;
     }
-
     createDbExcelPath = result.file_path;
     const fileLabel = document.getElementById("create-db-selected-file");
     if (fileLabel) fileLabel.textContent = createDbExcelPath;
@@ -1124,7 +1060,6 @@ async function selectCreateDbExcelFile() {
         "create-db-sheet-container",
       );
       const sheetSelect = document.getElementById("create-db-sheet-select");
-
       if (sheetSelect) {
         sheetSelect.innerHTML =
           '<option value="">-- Toutes les feuilles --</option>';
@@ -1137,7 +1072,6 @@ async function selectCreateDbExcelFile() {
       }
       if (sheetContainer) sheetContainer.classList.remove("hidden");
     }
-
     showMessage("#create-db-message", "Fichier selectionne avec succes.", true);
   } catch (error) {
     console.error(error);
@@ -1156,25 +1090,20 @@ async function createDatabaseFromExcel() {
     );
     return;
   }
-
   const dbNameInput = document.getElementById("create-db-name");
   const dbName = dbNameInput?.value.trim();
-
   if (!dbName) {
     showMessage("#create-db-message", "Veuillez entrer un nom de base.");
     dbNameInput?.focus();
     return;
   }
-
   showGlobalProgress(20, true);
-
   try {
     await waitForApi();
     const result = await window.pywebview.api.create_database_from_excel(
       createDbExcelPath,
       dbName,
     );
-
     showGlobalProgress(80, true);
 
     if (result?.success) {
@@ -1184,15 +1113,11 @@ async function createDatabaseFromExcel() {
         result.message || "Base de donnees creee avec succes.",
         true,
       );
-
       const exportSection = document.getElementById("create-db-export-section");
       if (exportSection) exportSection.classList.remove("hidden");
-
       window._createdDbPath = result.db_path;
-
       showNotification("Base de donnees creee avec succes.", true);
       logUserAction(`Creation de la base : ${result.db_name}`);
-
       loadDataDirectoryDatabases();
     } else {
       showGlobalProgress(0, false);
@@ -1211,25 +1136,20 @@ async function createDatabaseFromExcel() {
 async function createEmptyDatabase() {
   const dbNameInput = document.getElementById("create-db-name");
   const tableNameInput = document.getElementById("create-db-table-name");
-
   const dbName = dbNameInput?.value.trim();
   const tableName = tableNameInput?.value.trim() || "donnees";
-
   if (!dbName) {
     showMessage("#create-db-message", "Veuillez entrer un nom de base.");
     dbNameInput?.focus();
     return;
   }
-
   showGlobalProgress(30, true);
-
   try {
     await waitForApi();
     const result = await window.pywebview.api.create_new_database(
       dbName,
       tableName,
     );
-
     showGlobalProgress(100, true);
 
     if (result?.success) {
@@ -1238,15 +1158,11 @@ async function createEmptyDatabase() {
         result.message || "Base de donnees creee avec succes.",
         true,
       );
-
       const exportSection = document.getElementById("create-db-export-section");
       if (exportSection) exportSection.classList.remove("hidden");
-
       window._createdDbPath = result.db_path;
-
       showNotification("Base de donnees creee avec succes.", true);
       logUserAction(`Creation de la base vide : ${result.db_name}`);
-
       loadDataDirectoryDatabases();
     } else {
       showGlobalProgress(0, false);
@@ -1267,24 +1183,17 @@ async function exportCreatedDatabaseToExcel() {
     showNotification("Aucune base a exporter.", false);
     return;
   }
-
   try {
     await waitForApi();
     const saveResult = await window.pywebview.api.select_excel_save_file();
-    if (!saveResult || !saveResult.success) {
-      return;
-    }
-
+    if (!saveResult || !saveResult.success) return;
     showGlobalProgress(30, true);
-
     const result =
       await window.pywebview.api.export_database_to_excel_from_path(
         window._createdDbPath,
         saveResult.file_path,
       );
-
     showGlobalProgress(100, true);
-
     if (result?.success) {
       showNotification(`Excel exporte : ${saveResult.file_path}`, true);
       logUserAction(`Export de la base creee vers Excel`);
@@ -1470,7 +1379,6 @@ async function loadDataDirectoryDatabases() {
   const selectEl = document.getElementById("db-file-select");
   const container = document.getElementById("db-selection-container");
   if (!selectEl) return;
-
   try {
     await waitForApi();
     const res = await window.pywebview.api.get_data_directory_databases();
@@ -1498,16 +1406,13 @@ async function loadDataDirectoryDatabases() {
 async function openSelectedDatabase() {
   const selectEl = document.getElementById("db-file-select");
   const filePath = selectEl?.value;
-
   if (!filePath) {
     showNotification("Veuillez selectionner une base de donnees.", false);
     return;
   }
-
   try {
     await waitForApi();
     const result = await window.pywebview.api.open_database_path(filePath);
-
     if (result && result.success) {
       isDbOpen = true;
       const fileName = filePath.split("/").pop().split("\\").pop();
@@ -1517,19 +1422,15 @@ async function openSelectedDatabase() {
         label.style.color = "var(--success-color, #27ae60)";
         label.style.fontWeight = "600";
       }
-
       const actionsPanel = document.getElementById("db-actions-panel");
       if (actionsPanel) actionsPanel.classList.remove("hidden");
-
       updateTerminateButtonVisibility();
-
       const toggleChecked = document.getElementById(
         "toggle-show-tables-list",
       )?.checked;
       if (toggleChecked) {
         await loadDatabaseDetails(filePath);
       }
-
       showNotification(
         `Base de donnees "${fileName}" ouverte avec succes.`,
         true,
@@ -1555,7 +1456,6 @@ async function createMasterList() {
     showNotification("Veuillez d'abord ouvrir une base de donnees.", false);
     return;
   }
-
   if (
     !confirm(
       "Voulez-vous creer la liste mere ?\n\n" +
@@ -1564,13 +1464,10 @@ async function createMasterList() {
         "- Copier TOUTES les lignes (sans dedoublonnage)\n" +
         "- Ajouter les colonnes 'source_table' et 'ligne_origine'\n" +
         "- Ignorer les lignes sans nom et prenoms\n\n" +
-        "Vous pourrez ensuite utiliser 'Trouver les doublons' pour\n" +
-        "identifier et supprimer manuellement les doublons.\n\n" +
         "Continuer ?",
     )
-  ) {
+  )
     return;
-  }
 
   showGlobalProgress(20, true);
   showNotificationWithProgress(
@@ -1593,7 +1490,6 @@ async function createMasterList() {
       logUserAction(
         `Creation de la liste mere : ${result.total_persons} personne(s)`,
       );
-
       const toggleChecked = document.getElementById(
         "toggle-show-tables-list",
       )?.checked;
@@ -1632,17 +1528,17 @@ async function loadUserActivities() {
         activityList.innerHTML = res.activities
           .map(
             (act) => `
-                            <div class="activity-item" style="display: flex; justify-content: space-between; padding: 0.5rem 0; border-bottom: 1px solid var(--border-color, #eee);">
-                                <span>
-                                    <i class="fas fa-history" style="margin-right: 8px; color: var(--primary-color, #4f46e5);"></i> 
-                                    ${escapeHtml(act.text)}
-                                    <small style="color: var(--text-muted, gray); margin-left: 8px; font-weight: 400;">
-                                        (${escapeHtml(act.user || "Utilisateur")})
-                                    </small>
-                                </span>
-                                <small style="color: var(--text-muted, gray); white-space: nowrap;">${escapeHtml(act.date)}</small>
-                            </div>
-                        `,
+            <div class="activity-item" style="display: flex; justify-content: space-between; padding: 0.5rem 0; border-bottom: 1px solid var(--border-color, #eee);">
+              <span>
+                <i class="fas fa-history" style="margin-right: 8px; color: var(--primary-color, #4f46e5);"></i>
+                ${escapeHtml(act.text)}
+                <small style="color: var(--text-muted, gray); margin-left: 8px; font-weight: 400;">
+                  (${escapeHtml(act.user || "Utilisateur")})
+                </small>
+              </span>
+              <small style="color: var(--text-muted, gray); white-space: nowrap;">${escapeHtml(act.date)}</small>
+            </div>
+          `,
           )
           .join("");
       }
@@ -1684,21 +1580,19 @@ function showExportDialog(onExport) {
       <h3 style="margin: 0 0 0.5rem 0; color: #1a1a2e;"><i class="fas fa-file-export"></i> Exporter</h3>
       <p style="color: #64748b; margin-bottom: 1.5rem;">Choisissez le format d'exportation :</p>
       <div style="display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
-        <button data-format="pdf" style="padding: 0.6rem 1.5rem; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.95rem; transition: all 0.2s; background: #c0392b; color: white;">
+        <button data-format="pdf" style="padding: 0.6rem 1.5rem; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.95rem; background: #c0392b; color: white;">
           <i class="fas fa-file-pdf"></i> PDF
         </button>
-        <button data-format="excel" style="padding: 0.6rem 1.5rem; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.95rem; transition: all 0.2s; background: #27ae60; color: white;">
+        <button data-format="excel" style="padding: 0.6rem 1.5rem; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.95rem; background: #27ae60; color: white;">
           <i class="fas fa-file-excel"></i> Excel
         </button>
-        <button data-format="cancel" style="padding: 0.6rem 1.5rem; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.95rem; transition: all 0.2s; background: #6c757d; color: white;">
+        <button data-format="cancel" style="padding: 0.6rem 1.5rem; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.95rem; background: #6c757d; color: white;">
           <i class="fas fa-times"></i> Annuler
         </button>
       </div>
     </div>
   `;
-
   document.body.appendChild(overlay);
-
   overlay.querySelectorAll("button").forEach((btn) => {
     btn.addEventListener("click", () => {
       const format = btn.dataset.format;
@@ -1742,9 +1636,7 @@ function openEditModal(tableName, rowId, rowData, isNew = false) {
       <p style="color: #64748b; font-size: 0.85rem; margin-bottom: 1rem;">
         Table : <strong>${escapeHtml(tableName)}</strong>
       </p>
-      <div id="edit-form-fields">
-        ${formFields}
-      </div>
+      <div id="edit-form-fields">${formFields}</div>
       <div class="modal-actions">
         <button class="btn-cancel" id="btn-cancel-edit">Annuler</button>
         <button class="btn-save" id="btn-save-edit">
@@ -1777,30 +1669,24 @@ function openEditModal(tableName, rowId, rowData, isNew = false) {
             values[col] = input.value;
           }
         });
-
         if (Object.keys(values).length === 0) {
           showNotification("Veuillez remplir au moins un champ.", false);
           return;
         }
-
         try {
           await waitForApi();
           const activeDbPath = sessionStorage.getItem("current_db_path");
           showGlobalProgress(50, true);
-
           const res = await window.pywebview.api.insert_table_row(
             tableName,
             values,
             activeDbPath,
           );
-
           showGlobalProgress(100, true);
-
           if (res && res.success) {
             showNotification("Ligne ajoutee avec succes.", true);
             logUserAction(`Ajout d'une ligne dans ${tableName}`);
             closeModal();
-
             if (currentManipulateTable === tableName) {
               await loadManipulateTableData(tableName);
             }
@@ -1820,22 +1706,18 @@ function openEditModal(tableName, rowId, rowData, isNew = false) {
             rowData[col] === null || rowData[col] === undefined
               ? ""
               : String(rowData[col]);
-
           if (newValue !== oldValue) {
             updates[col] = newValue;
           }
         });
-
         if (Object.keys(updates).length === 0) {
           showNotification("Aucune modification a enregistrer.", false);
           return;
         }
-
         try {
           await waitForApi();
           const activeDbPath = sessionStorage.getItem("current_db_path");
           showGlobalProgress(50, true);
-
           let successCount = 0;
           for (const [col, val] of Object.entries(updates)) {
             const res = await window.pywebview.api.update_table_row(
@@ -1847,9 +1729,7 @@ function openEditModal(tableName, rowId, rowData, isNew = false) {
             );
             if (res && res.success) successCount++;
           }
-
           showGlobalProgress(100, true);
-
           if (successCount > 0) {
             showNotification(
               `${successCount} champ(s) modifie(s) avec succes.`,
@@ -1858,26 +1738,19 @@ function openEditModal(tableName, rowId, rowData, isNew = false) {
             logUserAction(
               `Modification de la ligne #${rowId} dans ${tableName}`,
             );
-
             for (const dup of allDuplicates) {
               if (dup.tableName === tableName) {
-                if (dup.row_index === rowId) {
-                  Object.assign(dup.data, updates);
-                }
-                if (dup.reference_id === rowId) {
+                if (dup.row_index === rowId) Object.assign(dup.data, updates);
+                if (dup.reference_id === rowId)
                   Object.assign(dup.reference_data, updates);
-                }
               }
             }
-
             if (typeof renderDuplicatesWithFilter === "function") {
               renderDuplicatesWithFilter();
             }
-
             if (currentManipulateTable === tableName) {
               await loadManipulateTableData(tableName);
             }
-
             closeModal();
           } else {
             showNotification("Erreur lors de la modification.", false);
@@ -1896,7 +1769,6 @@ function openEditModal(tableName, rowId, rowData, isNew = false) {
 async function loadDuplicateTableFilter() {
   const container = document.getElementById("dup-tables-checkboxes");
   if (!container) return;
-
   try {
     await waitForApi();
     const activeDbPath = sessionStorage.getItem("current_db_path");
@@ -1914,16 +1786,12 @@ async function loadDuplicateTableFilter() {
         `;
         const chk = label.querySelector("input");
         chk.addEventListener("change", () => {
-          if (chk.checked) {
-            label.classList.add("checked");
-          } else {
-            label.classList.remove("checked");
-          }
+          if (chk.checked) label.classList.add("checked");
+          else label.classList.remove("checked");
           updateDuplicateTablesInfo();
         });
         container.appendChild(label);
       });
-
       updateDuplicateTablesInfo();
     } else {
       container.innerHTML =
@@ -1965,7 +1833,6 @@ function initDuplicatesPage() {
   const btnExportDups = document.querySelector("#btn-export-dups");
   const btnExpandDups = document.querySelector("#btn-expand-dups");
   const btnAddDup = document.querySelector("#btn-add-dups");
-
   const btnCheckAllTables = document.querySelector("#btn-check-all-tables");
   const btnUncheckAllTables = document.querySelector("#btn-uncheck-all-tables");
 
@@ -1978,7 +1845,6 @@ function initDuplicatesPage() {
 
   const radioButtons = document.querySelectorAll('input[name="dup-algorithm"]');
   const labels = document.querySelectorAll(".dup-algorithm-selector label");
-
   radioButtons.forEach((radio, index) => {
     radio.addEventListener("change", () => {
       labels.forEach((l, i) => {
@@ -1993,7 +1859,6 @@ function initDuplicatesPage() {
       showNotification("Liste des tables actualisee.", true);
     });
   }
-
   if (refreshDupsBtn) {
     refreshDupsBtn.addEventListener("click", async () => {
       if (allDuplicates.length === 0) {
@@ -2007,7 +1872,6 @@ function initDuplicatesPage() {
       await refreshDuplicateResults();
     });
   }
-
   if (btnCheckAllTables) {
     btnCheckAllTables.addEventListener("click", () => {
       document.querySelectorAll(".dup-table-checkbox").forEach((chk) => {
@@ -2017,7 +1881,6 @@ function initDuplicatesPage() {
       updateDuplicateTablesInfo();
     });
   }
-
   if (btnUncheckAllTables) {
     btnUncheckAllTables.addEventListener("click", () => {
       document.querySelectorAll(".dup-table-checkbox").forEach((chk) => {
@@ -2027,7 +1890,6 @@ function initDuplicatesPage() {
       updateDuplicateTablesInfo();
     });
   }
-
   if (runBtn) {
     runBtn.addEventListener("click", async () => {
       const selectedAlgo =
@@ -2036,20 +1898,17 @@ function initDuplicatesPage() {
       await runDuplicateScan(selectedAlgo);
     });
   }
-
   if (cancelBtn) {
     cancelBtn.addEventListener("click", () => {
       duplicateScanCancelled = true;
       showNotification("Analyse annulee.", false);
     });
   }
-
   if (btnSelectAll) {
     btnSelectAll.addEventListener("click", () => {
       const checkboxes = document.querySelectorAll(".dup-checkbox");
       if (checkboxes.length === 0) return;
       const allChecked = Array.from(checkboxes).every((chk) => chk.checked);
-
       checkboxes.forEach((chk) => {
         chk.checked = !allChecked;
       });
@@ -2059,7 +1918,6 @@ function initDuplicatesPage() {
       updateSelectAllButton();
     });
   }
-
   if (btnEditDups) {
     btnEditDups.addEventListener("click", async () => {
       const checkedBoxes = document.querySelectorAll(".dup-checkbox:checked");
@@ -2077,15 +1935,12 @@ function initDuplicatesPage() {
         );
         return;
       }
-
       const chk = checkedBoxes[0];
       const tableName = chk.getAttribute("data-table");
       const rowIndex = parseInt(chk.getAttribute("data-rowid"));
-
       const duplicate = allDuplicates.find(
         (d) => d.tableName === tableName && d.row_index === rowIndex,
       );
-
       if (!duplicate) {
         showNotification(
           "Impossible de trouver les donnees de cette ligne.",
@@ -2093,11 +1948,9 @@ function initDuplicatesPage() {
         );
         return;
       }
-
       openEditModal(tableName, rowIndex, duplicate.data, false);
     });
   }
-
   if (btnAddDup) {
     btnAddDup.addEventListener("click", async () => {
       const activeDbPath = sessionStorage.getItem("current_db_path");
@@ -2107,41 +1960,34 @@ function initDuplicatesPage() {
         showNotification("Aucune table disponible.", false);
         return;
       }
-
       const tableName = tablesRes.tables[0];
       const struct =
         await window.pywebview.api.get_database_structure_matrix(activeDbPath);
       const columns = struct.structure[tableName] || [];
-
       const emptyRow = {};
       columns.forEach((col) => {
         if (col !== "id" && col !== "rowid") {
           emptyRow[col] = "";
         }
       });
-
       openEditModal(tableName, null, emptyRow, true);
     });
   }
-
   if (btnDeleteDups) {
     btnDeleteDups.addEventListener("click", async () => {
       await deleteSelectedDuplicatesWithProgress();
     });
   }
-
   if (btnDeleteAllDups) {
     btnDeleteAllDups.addEventListener("click", async () => {
       await deleteAllDuplicatesWithProgress();
     });
   }
-
   if (btnExportDups) {
     btnExportDups.addEventListener("click", () => {
       exportDuplicatesWithDialog();
     });
   }
-
   if (btnExpandDups) {
     btnExpandDups.addEventListener("click", () => {
       const contentElem = document.querySelector("#db-results-content");
@@ -2171,7 +2017,6 @@ async function runDuplicateScan(selectedAlgo) {
   const checkedTables = Array.from(
     document.querySelectorAll(".dup-table-checkbox:checked"),
   ).map((chk) => chk.value);
-
   if (checkedTables.length === 0) {
     showNotification("Veuillez selectionner au moins une table.", false);
     return;
@@ -2183,14 +2028,11 @@ async function runDuplicateScan(selectedAlgo) {
     '<p style="color: var(--text-muted, #64748b);">Analyse en cours...</p>';
   statusDiv.textContent = `Analyse avec l'algorithme "${selectedAlgo === "general" ? "General" : "CIN + NOM + COMMUNE + FKT"}" sur ${checkedTables.length} table(s)...`;
   duplicateScanCancelled = false;
-
   if (cancelBtn) cancelBtn.style.display = "inline-block";
   if (runBtn) runBtn.disabled = true;
 
-  // ✅ Afficher la barre de progression GLOBALE (en haut de la page)
   showGlobalProgress(0, true);
 
-  // ✅ Afficher aussi une notification persistante de progression
   const container = document.querySelector("#notification-container");
   let progressNotif = document.getElementById("dup-scan-progress-notif");
   if (!progressNotif) {
@@ -2206,9 +2048,7 @@ async function runDuplicateScan(selectedAlgo) {
   try {
     await waitForApi();
     const activeDbPath = sessionStorage.getItem("current_db_path");
-
     const tablesToScan = checkedTables;
-
     allDuplicates = [];
 
     for (let i = 0; i < tablesToScan.length; i++) {
@@ -2216,7 +2056,6 @@ async function runDuplicateScan(selectedAlgo) {
       const currentTable = tablesToScan[i];
       const pct = Math.round(((i + 1) / tablesToScan.length) * 100);
 
-      // ✅ Mettre a jour la notification
       progressNotif.innerHTML = `
         <div style="font-weight: bold; margin-bottom: 4px;">
           <i class="fas fa-search"></i> Analyse des doublons...
@@ -2229,7 +2068,6 @@ async function runDuplicateScan(selectedAlgo) {
           <div style="width: ${pct}%; background: #ffffff; height: 100%; transition: width 0.3s ease;"></div>
         </div>
       `;
-
       showGlobalProgress(pct, true);
 
       const scanRes = await window.pywebview.api.scan_table_duplicates_advanced(
@@ -2237,7 +2075,6 @@ async function runDuplicateScan(selectedAlgo) {
         selectedAlgo,
         activeDbPath,
       );
-
       if (duplicateScanCancelled) break;
       if (scanRes && scanRes.success && scanRes.duplicates) {
         scanRes.duplicates.forEach((dup) => {
@@ -2260,7 +2097,6 @@ async function runDuplicateScan(selectedAlgo) {
 
     showGlobalProgress(100, true);
 
-    // ✅ Masquer la notification de progression
     if (progressNotif) {
       progressNotif.innerHTML = `
         <div style="font-weight: bold; margin-bottom: 4px;">
@@ -2289,11 +2125,9 @@ async function runDuplicateScan(selectedAlgo) {
       showNotification(`${allDuplicates.length} doublon(s) trouve(s).`, true);
       statusDiv.textContent = `${allDuplicates.length} doublon(s) identifie(s) avec l'algorithme "${selectedAlgo === "general" ? "General" : "CIN + NOM + COMMUNE + FKT"}"`;
       if (countBadge) countBadge.textContent = allDuplicates.length;
-
       if (allDuplicates.length > 0 && allDuplicates[0].data) {
         currentColumns = Object.keys(allDuplicates[0].data);
       }
-
       renderDuplicatesWithFilter();
     }
   } catch (err) {
@@ -2316,7 +2150,6 @@ function renderDuplicatesWithFilter() {
   if (!resultsBody) return;
 
   const filteredDuplicates = allDuplicates;
-
   if (filteredDuplicates.length === 0) {
     resultsBody.innerHTML =
       "<p style='color: var(--warning, #f39c12);'>Aucun doublon a afficher.</p>";
@@ -2326,7 +2159,6 @@ function renderDuplicatesWithFilter() {
   const MAX_DISPLAY = 500;
   let displayDuplicates = filteredDuplicates;
   let hasMore = false;
-
   if (filteredDuplicates.length > MAX_DISPLAY) {
     displayDuplicates = filteredDuplicates.slice(0, MAX_DISPLAY);
     hasMore = true;
@@ -2361,30 +2193,20 @@ function renderDuplicatesWithFilter() {
     html += `<th style="padding: 0.3rem 0.4rem; border: 1px solid var(--border-color, #e2e8f0);">${escapeHtml(col)}</th>`;
   });
 
-  html += `
-          </tr>
-        </thead>
-        <tbody>
-  `;
+  html += `</tr></thead><tbody>`;
 
   for (let idx = 0; idx < displayDuplicates.length; idx++) {
     const dup = displayDuplicates[idx];
     const tableName = escapeHtml(dup.tableName || dup.table || "");
     const rowIndex = escapeHtml(String(dup.row_index || ""));
     const refId = escapeHtml(String(dup.reference_id || ""));
-
     const dupData = dup.data || {};
     const refData = dup.reference_data || {};
 
     html += `
       <tr style="border-bottom: 1px solid var(--border-color, #e2e8f0); background: ${idx % 2 === 0 ? "transparent" : "rgba(231, 76, 60, 0.03)"};">
         <td style="text-align: center; padding: 0.2rem 0.3rem; border: 1px solid var(--border-color, #e2e8f0);">
-          <input type="checkbox" class="dup-checkbox" 
-                 data-index="${idx}" 
-                 data-table="${tableName}" 
-                 data-rowid="${rowIndex}" 
-                 checked 
-                 style="width: 14px; height: 14px; cursor: pointer;" />
+          <input type="checkbox" class="dup-checkbox" data-index="${idx}" data-table="${tableName}" data-rowid="${rowIndex}" checked style="width: 14px; height: 14px; cursor: pointer;" />
         </td>
         <td style="text-align: center; padding: 0.2rem 0.3rem; border: 1px solid var(--border-color, #e2e8f0);">
           <button class="btn-edit-row" data-table="${tableName}" data-rowid="${rowIndex}" title="Modifier cette ligne" style="background: #f39c12; color: white; border: none; padding: 2px 6px; border-radius: 3px; cursor: pointer; font-size: 0.65rem;">
@@ -2442,9 +2264,7 @@ function renderDuplicatesWithFilter() {
   }
 
   html += `
-        </tbody>
-      </table>
-    </div>
+    </tbody></table></div>
     ${hasMore ? `<p style="color: orange; font-size: 0.85rem; margin-top: 8px;">${filteredDuplicates.length - MAX_DISPLAY} doublons supplementaires non affiches (mais bien pris en compte par "TOUT SUPPRIMER").</p>` : ""}
   `;
 
@@ -2459,22 +2279,17 @@ function renderDuplicatesWithFilter() {
       e.preventDefault();
       const tableName = this.getAttribute("data-table");
       const rowId = parseInt(this.getAttribute("data-rowid"));
-
       let rowData = null;
       for (const dup of allDuplicates) {
         if (
           dup.tableName === tableName &&
           (dup.row_index === rowId || dup.reference_id === rowId)
         ) {
-          if (dup.row_index === rowId) {
-            rowData = dup.data;
-          } else {
-            rowData = dup.reference_data;
-          }
+          if (dup.row_index === rowId) rowData = dup.data;
+          else rowData = dup.reference_data;
           break;
         }
       }
-
       if (!rowData) {
         showNotification(
           "Impossible de trouver les donnees de cette ligne.",
@@ -2482,7 +2297,6 @@ function renderDuplicatesWithFilter() {
         );
         return;
       }
-
       openEditModal(tableName, rowId, rowData, false);
     });
   });
@@ -2492,13 +2306,8 @@ function renderDuplicatesWithFilter() {
       e.preventDefault();
       const tableName = this.getAttribute("data-table");
       const rowId = parseInt(this.getAttribute("data-rowid"));
-
-      if (
-        !confirm(`Supprimer la ligne #${rowId} de la table "${tableName}" ?`)
-      ) {
+      if (!confirm(`Supprimer la ligne #${rowId} de la table "${tableName}" ?`))
         return;
-      }
-
       try {
         await waitForApi();
         const activeDbPath = sessionStorage.getItem("current_db_path");
@@ -2507,7 +2316,6 @@ function renderDuplicatesWithFilter() {
           rowId,
           activeDbPath,
         );
-
         if (res && res.success) {
           showNotification("Ligne supprimee avec succes.", true);
           logUserAction(`Suppression de la ligne #${rowId} dans ${tableName}`);
@@ -2518,10 +2326,8 @@ function renderDuplicatesWithFilter() {
                 (d.row_index === rowId || d.reference_id === rowId)
               ),
           );
-
           const countBadge = document.getElementById("dup-results-count");
           if (countBadge) countBadge.textContent = allDuplicates.length;
-
           renderDuplicatesWithFilter();
         } else {
           showNotification(
@@ -2544,11 +2350,9 @@ async function refreshDuplicateResults() {
     showNotification("Aucun resultat a actualiser.", false);
     return;
   }
-
   try {
     await waitForApi();
     const activeDbPath = sessionStorage.getItem("current_db_path");
-
     showGlobalProgress(30, true);
 
     let updatedDuplicates = [];
@@ -2566,20 +2370,17 @@ async function refreshDuplicateResults() {
         30 + Math.round((processed / tables.length) * 60),
         true,
       );
-
       if (tableData && tableData.success) {
         const rowsMap = {};
         tableData.data.forEach((row, idx) => {
           rowsMap[idx + 1] = row;
         });
-
         const tableDuplicates = allDuplicates.filter(
           (d) => d.tableName === table,
         );
         for (const dup of tableDuplicates) {
           const newDupData = rowsMap[dup.row_index];
           const newRefData = rowsMap[dup.reference_id];
-
           if (newDupData && newRefData) {
             updatedDuplicates.push({
               ...dup,
@@ -2592,15 +2393,11 @@ async function refreshDuplicateResults() {
     }
 
     showGlobalProgress(100, true);
-
     const removedCount = allDuplicates.length - updatedDuplicates.length;
     allDuplicates = updatedDuplicates;
-
     const countBadge = document.getElementById("dup-results-count");
     if (countBadge) countBadge.textContent = allDuplicates.length;
-
     renderDuplicatesWithFilter();
-
     if (removedCount > 0) {
       showNotification(
         `${removedCount} doublon(s) supprime(s) depuis la derniere analyse.`,
@@ -2616,7 +2413,7 @@ async function refreshDuplicateResults() {
 }
 
 // ============================================
-// SUPPRESSION PAR SELECTION (optimisee batch)
+// SUPPRESSION PAR SELECTION (batch)
 // ============================================
 async function deleteSelectedDuplicatesWithProgress() {
   const checkedBoxes = document.querySelectorAll(".dup-checkbox:checked");
@@ -2627,41 +2424,32 @@ async function deleteSelectedDuplicatesWithProgress() {
     );
     return;
   }
-
   if (
     !confirm(
       `Attention : vous allez supprimer definitivement ${checkedBoxes.length} doublon(s). Continuer ?`,
     )
-  ) {
+  )
     return;
-  }
 
   try {
     await waitForApi();
     const activeDbPath = sessionStorage.getItem("current_db_path");
-
-    // Construire la liste
     const duplicatesToDelete = [];
     checkedBoxes.forEach((chk) => {
       const tableName = chk.getAttribute("data-table");
       const rowIndex = chk.getAttribute("data-rowid");
       if (tableName && rowIndex) {
-        duplicatesToDelete.push({
-          tableName: tableName,
-          row_index: parseInt(rowIndex),
-        });
+        duplicatesToDelete.push({ tableName, row_index: parseInt(rowIndex) });
       }
     });
 
     showGlobalProgress(30, true);
     showNotification("Suppression en cours...", true);
 
-    // ✅ UN SEUL APPEL API
     const result = await window.pywebview.api.delete_duplicates_batch(
       duplicatesToDelete,
       activeDbPath,
     );
-
     showGlobalProgress(100, true);
 
     if (result && result.success) {
@@ -2671,19 +2459,14 @@ async function deleteSelectedDuplicatesWithProgress() {
       logUserAction(
         `Suppression de ${deleted} doublons en ${elapsed_seconds}s`,
       );
-
-      // Filtrer la liste locale
       allDuplicates = allDuplicates.filter((d) => {
         return !duplicatesToDelete.some(
           (dd) => dd.tableName === d.tableName && dd.row_index === d.row_index,
         );
       });
-
       const countBadge = document.getElementById("dup-results-count");
       if (countBadge) countBadge.textContent = allDuplicates.length;
-
       renderDuplicatesWithFilter();
-
       if (allDuplicates.length === 0) {
         document
           .getElementById("dup-results-container")
@@ -2702,14 +2485,13 @@ async function deleteSelectedDuplicatesWithProgress() {
 }
 
 // ============================================
-// ✅ TOUT SUPPRIMER - VERSION ULTRA-RAPIDE
+// TOUT SUPPRIMER
 // ============================================
 async function deleteAllDuplicatesWithProgress() {
   if (allDuplicates.length === 0) {
     showNotification("Aucun doublon a supprimer.", false);
     return;
   }
-
   const total = allDuplicates.length;
 
   if (
@@ -2719,24 +2501,19 @@ async function deleteAllDuplicatesWithProgress() {
         `Cette action est IRREVERSIBLE.\n\n` +
         `Voulez-vous vraiment continuer ?`,
     )
-  ) {
+  )
     return;
-  }
 
   if (
     !confirm(
-      `Derniere confirmation :\n\n` +
-        `${total} ligne(s) vont etre supprimees.\n\n` +
-        `Confirmer la suppression massive ?`,
+      `Derniere confirmation :\n\n${total} ligne(s) vont etre supprimees.\n\nConfirmer la suppression massive ?`,
     )
-  ) {
+  )
     return;
-  }
 
   try {
     await waitForApi();
     const activeDbPath = sessionStorage.getItem("current_db_path");
-
     showGlobalProgress(10, true);
 
     const container = document.querySelector("#notification-container");
@@ -2766,12 +2543,10 @@ async function deleteAllDuplicatesWithProgress() {
 
     showGlobalProgress(30, true);
 
-    // ✅ UN SEUL APPEL API POUR TOUT SUPPRIMER
     const result = await window.pywebview.api.delete_duplicates_batch(
       allDuplicates,
       activeDbPath,
     );
-
     showGlobalProgress(100, true);
 
     setTimeout(() => {
@@ -2783,32 +2558,23 @@ async function deleteAllDuplicatesWithProgress() {
 
     if (result && result.success) {
       const { deleted, errors, elapsed_seconds, details } = result;
-
       let msg = `${deleted} doublon(s) supprimes en ${elapsed_seconds}s`;
-      if (errors > 0) {
-        msg += ` (${errors} erreur(s))`;
-      }
+      if (errors > 0) msg += ` (${errors} erreur(s))`;
       showNotification(msg, errors === 0);
       logUserAction(
         `Suppression MASSIVE de ${deleted} doublons en ${elapsed_seconds}s`,
       );
 
       allDuplicates = [];
-
       const countBadge = document.getElementById("dup-results-count");
       if (countBadge) countBadge.textContent = "0";
-
       renderDuplicatesWithFilter();
-
       document.getElementById("dup-results-container").classList.add("hidden");
       const statusDiv = document.getElementById("dup-scan-status");
       if (statusDiv) {
         statusDiv.textContent = `Suppression massive terminee : ${deleted} doublon(s) supprime(s) en ${elapsed_seconds}s.`;
       }
-
-      if (details) {
-        console.log("[DETAILS] Suppressions par table :", details);
-      }
+      if (details) console.log("[DETAILS] Suppressions par table :", details);
     } else {
       showNotification(
         result?.message || "Erreur lors de la suppression massive.",
@@ -2818,7 +2584,6 @@ async function deleteAllDuplicatesWithProgress() {
   } catch (err) {
     console.error("Erreur lors de la suppression massive:", err);
     showNotification("Erreur lors de la suppression massive.", false);
-
     const progressNotif = document.getElementById(
       "duplicate-delete-all-progress",
     );
@@ -2837,35 +2602,21 @@ async function exportDuplicatesWithDialog() {
     showNotification("Aucun resultat de doublons a exporter.", false);
     return;
   }
-
   showExportDialog(async (format) => {
-    if (format === "pdf") {
-      await exportDuplicatesToPDF();
-    } else if (format === "excel") {
-      await exportDuplicatesToExcel();
-    }
+    if (format === "pdf") await exportDuplicatesToPDF();
+    else if (format === "excel") await exportDuplicatesToExcel();
   });
 }
 
 async function exportDuplicatesToExcel() {
   try {
     const filteredDuplicates = allDuplicates;
-
     if (filteredDuplicates.length === 0) {
       showNotification("Aucune donnee a exporter.", false);
       return;
     }
-
     const result = await window.pywebview.api.select_excel_export_file();
-    if (!result || !result.success) {
-      if (result?.message !== "Aucun fichier selectionne.") {
-        showNotification(
-          result?.message || "Erreur lors de la selection du fichier.",
-          false,
-        );
-      }
-      return;
-    }
+    if (!result || !result.success) return;
 
     const data = [];
     filteredDuplicates.forEach((dup) => {
@@ -2876,7 +2627,6 @@ async function exportDuplicatesToExcel() {
       };
       Object.assign(rowData, dup.data || {});
       data.push(rowData);
-
       const refData = {
         Table: dup.tableName,
         Type: "REFERENCE",
@@ -2887,12 +2637,10 @@ async function exportDuplicatesToExcel() {
     });
 
     showNotificationWithProgress("Export des doublons vers Excel...", 30, true);
-
     const exportResult = await window.pywebview.api.generate_excel_from_data(
       result.file_path,
       data,
     );
-
     showNotificationWithProgress("Export termine.", 100, true);
 
     if (exportResult && exportResult.success) {
@@ -2913,22 +2661,12 @@ async function exportDuplicatesToExcel() {
 async function exportDuplicatesToPDF() {
   try {
     const filteredDuplicates = allDuplicates;
-
     if (filteredDuplicates.length === 0) {
       showNotification("Aucune donnee a exporter.", false);
       return;
     }
-
     const result = await window.pywebview.api.select_pdf_file();
-    if (!result || !result.success) {
-      if (result?.message !== "Aucun fichier selectionne.") {
-        showNotification(
-          result?.message || "Erreur lors de la selection du fichier.",
-          false,
-        );
-      }
-      return;
-    }
+    if (!result || !result.success) return;
 
     const allColumns =
       currentColumns.length > 0
@@ -2946,38 +2684,23 @@ async function exportDuplicatesToPDF() {
           body { font-family: 'DejaVu Sans', Arial, sans-serif; padding: 20px; color: #1a1a2e; background: #ffffff; font-size: 8px; }
           .header { text-align: center; padding-bottom: 15px; border-bottom: 2px solid #4f46e5; margin-bottom: 15px; }
           .header h1 { color: #4f46e5; font-size: 18px; }
-          .header .subtitle { color: #666; font-size: 10px; margin-top: 3px; }
-          .info-grid { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 8px; background: #f8fafc; padding: 10px 15px; border-radius: 6px; margin-bottom: 15px; border: 1px solid #e2e8f0; }
-          .info-grid .label { font-weight: 600; color: #4f46e5; font-size: 7px; text-transform: uppercase; }
-          .info-grid .value { font-size: 10px; }
           .summary { background: #e0e7ff; padding: 8px 14px; border-radius: 6px; margin-bottom: 12px; border-left: 4px solid #4f46e5; font-weight: 600; font-size: 12px; color: #4f46e5; }
           table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 6.5px; }
           th { background: #4f46e5; color: white; padding: 4px 5px; text-align: left; border: 1px solid #4f46e5; }
           td { padding: 3px 5px; border: 1px solid #e2e8f0; word-wrap: break-word; max-width: 120px; }
-          .dup-row { background: rgba(231, 76, 60, 0.05); }
-          .ref-row { background: rgba(39, 174, 96, 0.05); }
           .footer { margin-top: 20px; padding-top: 10px; border-top: 1px solid #e2e8f0; text-align: center; color: #94a3b8; font-size: 7px; }
-          @page { margin: 0.8cm; size: A4 landscape; }
         </style>
       </head>
       <body>
         <div class="header">
           <h1>Rapport des doublons</h1>
-          <div class="subtitle">Data Manager - Expert Edition</div>
-        </div>
-        <div class="info-grid">
-          <div><div class="label">Date</div><div class="value">${new Date().toLocaleString()}</div></div>
-          <div><div class="label">Base</div><div class="value">${document.getElementById("selected-db-path-label")?.textContent || "Non specifiee"}</div></div>
-          <div><div class="label">Algorithme</div><div class="value">${currentDuplicatesAlgo}</div></div>
-          <div><div class="label">Total</div><div class="value" style="color: #e74c3c; font-weight: 700;">${filteredDuplicates.length}</div></div>
+          <div style="color: #666; font-size: 10px; margin-top: 3px;">xl2db - Expert Edition</div>
         </div>
         <div class="summary">${filteredDuplicates.length} doublon(s) - ${allColumns.length} attributs</div>
         <table>
           <thead>
             <tr>
-              <th>Table</th>
-              <th>Type</th>
-              <th>ID</th>
+              <th>Table</th><th>Type</th><th>ID</th>
               ${allColumns.map((c) => `<th>${escapeHtml(c)}</th>`).join("")}
             </tr>
           </thead>
@@ -2985,14 +2708,14 @@ async function exportDuplicatesToPDF() {
     `;
 
     filteredDuplicates.forEach((dup) => {
-      htmlContent += `<tr class="dup-row"><td>${escapeHtml(dup.tableName)}</td><td>DOUBLON</td><td>#${dup.row_index}</td>`;
+      htmlContent += `<tr><td>${escapeHtml(dup.tableName)}</td><td>DOUBLON</td><td>#${dup.row_index}</td>`;
       allColumns.forEach((col) => {
         const val = dup.data?.[col];
         htmlContent += `<td>${escapeHtml(val === null || val === undefined ? "" : String(val))}</td>`;
       });
       htmlContent += `</tr>`;
 
-      htmlContent += `<tr class="ref-row"><td>${escapeHtml(dup.tableName)}</td><td>REFERENCE</td><td>#${dup.reference_id}</td>`;
+      htmlContent += `<tr style="background: rgba(39, 174, 96, 0.05);"><td>${escapeHtml(dup.tableName)}</td><td>REFERENCE</td><td>#${dup.reference_id}</td>`;
       allColumns.forEach((col) => {
         const val = dup.reference_data?.[col];
         htmlContent += `<td>${escapeHtml(val === null || val === undefined ? "" : String(val))}</td>`;
@@ -3000,21 +2723,13 @@ async function exportDuplicatesToPDF() {
       htmlContent += `</tr>`;
     });
 
-    htmlContent += `
-          </tbody>
-        </table>
-        <div class="footer">Rapport genere par Data Manager - Expert Edition</div>
-      </body>
-      </html>
-    `;
+    htmlContent += `</tbody></table></body></html>`;
 
     showNotificationWithProgress("Generation du PDF...", 50, true);
-
     const pdfResult = await window.pywebview.api.generate_pdf_from_html(
       result.file_path,
       htmlContent,
     );
-
     showNotificationWithProgress("PDF genere.", 100, true);
 
     if (pdfResult && pdfResult.success) {
@@ -3070,7 +2785,6 @@ async function initManipulatePage() {
     };
   }
 
-  // ✅ Bouton "Agrandir" dans la vue Manipulation
   const btnExpandManipulate = document.querySelector("#btn-expand-manipulate");
   if (btnExpandManipulate) {
     btnExpandManipulate.addEventListener("click", () => {
@@ -3101,7 +2815,6 @@ async function initManipulatePage() {
       showNotification("Donnees actualisees.", true);
     });
   }
-
   if (btnShowResults) {
     btnShowResults.addEventListener("click", async () => {
       if (!currentManipulateTable) {
@@ -3112,30 +2825,23 @@ async function initManipulatePage() {
       showNotification("Resultats affiches.", true);
     });
   }
-
   if (btnAddRow) {
     btnAddRow.addEventListener("click", async () => {
       if (!currentManipulateTable) {
         showNotification("Veuillez d'abord selectionner une table.", false);
         return;
       }
-
       const activeDbPath = sessionStorage.getItem("current_db_path");
       const struct =
         await window.pywebview.api.get_database_structure_matrix(activeDbPath);
       const columns = struct.structure[currentManipulateTable] || [];
-
       const emptyRow = {};
       columns.forEach((col) => {
-        if (col !== "id" && col !== "rowid") {
-          emptyRow[col] = "";
-        }
+        if (col !== "id" && col !== "rowid") emptyRow[col] = "";
       });
-
       openEditModal(currentManipulateTable, null, emptyRow, true);
     });
   }
-
   if (btnDeleteTable) {
     btnDeleteTable.addEventListener("click", () => {
       if (!currentManipulateTable) {
@@ -3148,7 +2854,6 @@ async function initManipulatePage() {
       deleteSelectedTable(currentManipulateTable);
     });
   }
-
   if (!tableSelect) return;
   await loadManipulateTables();
 
@@ -3159,15 +2864,11 @@ async function initManipulatePage() {
         showNotification("Veuillez selectionner une table.", false);
         return;
       }
-
       currentManipulateTable = selectedTable;
       window._activeValueFilters = {};
       window._activeColumnFilters = null;
-
       showNotification(`Table ${selectedTable} selectionnee.`, true);
-
       await loadManipulateTableData(selectedTable);
-
       if (searchInput) searchInput.value = "";
       if (filtersArea) {
         filtersArea.classList.add("hidden");
@@ -3191,24 +2892,22 @@ async function initManipulatePage() {
         showNotification("Veuillez d'abord selectionner une table.", false);
         return;
       }
-
       if (!val) {
         displayManipulateData(
           currentManipulateData,
           resultsContainer,
           countSpan,
+          currentManipulateTotalCount,
         );
         currentManipulateFiltered = currentManipulateData;
         return;
       }
-
       try {
         const filtered = currentManipulateData.filter((row) => {
           return Object.values(row).some((value) =>
             String(value).toUpperCase().includes(val.toUpperCase()),
           );
         });
-
         if (filtered.length === 0) {
           showNotification(
             "Aucun resultat trouve pour cette recherche.",
@@ -3217,8 +2916,12 @@ async function initManipulatePage() {
         } else {
           showNotification(`${filtered.length} resultat(s) trouve(s).`, true);
         }
-
-        displayManipulateData(filtered, resultsContainer, countSpan);
+        displayManipulateData(
+          filtered,
+          resultsContainer,
+          countSpan,
+          filtered.length,
+        );
         currentManipulateFiltered = filtered;
       } catch (err) {
         console.error(err);
@@ -3234,7 +2937,6 @@ async function initManipulatePage() {
         showNotification("Veuillez d'abord selectionner une table.", false);
         return;
       }
-
       const isVisible =
         searchBarArea && !searchBarArea.classList.contains("hidden");
       if (isVisible) {
@@ -3244,7 +2946,6 @@ async function initManipulatePage() {
         this.style.color = "";
         return;
       }
-
       if (filtersArea) {
         filtersArea.classList.add("hidden");
         filtersArea.style.display = "none";
@@ -3253,7 +2954,6 @@ async function initManipulatePage() {
         operationsArea.classList.add("hidden");
         operationsArea.style.display = "none";
       }
-
       searchBarArea.classList.remove("hidden");
       searchBarArea.style.display = "flex";
       searchInput.focus();
@@ -3269,7 +2969,6 @@ async function initManipulatePage() {
         showNotification("Veuillez d'abord selectionner une table.", false);
         return;
       }
-
       const isVisible =
         filtersArea && !filtersArea.classList.contains("hidden");
       if (isVisible) {
@@ -3279,7 +2978,6 @@ async function initManipulatePage() {
         this.style.color = "";
         return;
       }
-
       if (searchBarArea) {
         searchBarArea.classList.add("hidden");
         searchBarArea.style.display = "none";
@@ -3305,9 +3003,7 @@ async function initManipulatePage() {
               <h4 style="margin-bottom: 12px; color: var(--text-color); font-weight: bold;">
                 <i class="fas fa-filter"></i> Filtrer
               </h4>
-              <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1rem;">
-                Choisissez le type de filtre :
-              </p>
+              <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1rem;">Choisissez le type de filtre :</p>
               <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 1rem;">
                 <button id="btn-filter-results-mode" class="button button-primary" type="button" style="padding: 0.6rem 1.2rem;">
                   <i class="fas fa-list-check"></i> Filtrer les resultats
@@ -3363,12 +3059,8 @@ async function initManipulatePage() {
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 10px;">
                   <h4 id="distinct-values-title" style="margin: 0; color: var(--text-color); font-weight: bold;"></h4>
                   <div style="display: flex; gap: 8px;">
-                    <button id="btn-select-all-values" class="secondary-button" style="padding: 0.3rem 0.8rem; font-size: 0.8rem;">
-                      Tout cocher
-                    </button>
-                    <button id="btn-deselect-all-values" class="secondary-button" style="padding: 0.3rem 0.8rem; font-size: 0.8rem;">
-                      Tout decocher
-                    </button>
+                    <button id="btn-select-all-values" class="secondary-button" style="padding: 0.3rem 0.8rem; font-size: 0.8rem;">Tout cocher</button>
+                    <button id="btn-deselect-all-values" class="secondary-button" style="padding: 0.3rem 0.8rem; font-size: 0.8rem;">Tout decocher</button>
                   </div>
                 </div>
                 <div id="distinct-values-checkboxes" style="display: flex; flex-direction: column; gap: 6px; max-height: 350px; overflow-y: auto; padding: 10px; background: var(--bg-secondary, #f8fafc); border-radius: 6px;"></div>
@@ -3423,11 +3115,9 @@ async function initManipulatePage() {
                       b.style.background = "#fef3c7";
                       b.style.color = "#92400e";
                     });
-
                   btn.style.borderColor = "#4f46e5";
                   btn.style.background = "#e0e7ff";
                   btn.style.color = "#4f46e5";
-
                   distinctValuesContainer.style.display = "block";
                   distinctValuesTitle.innerHTML = `<i class="fas fa-list"></i> Valeurs distinctes de "${escapeHtml(actualCol)}"`;
                   distinctValuesCheckboxes.innerHTML =
@@ -3440,19 +3130,15 @@ async function initManipulatePage() {
                         actualCol,
                         activeDbPath,
                       );
-
                     if (result?.success && result.values.length > 0) {
                       const activeValues =
                         window._activeValueFilters[actualCol] || null;
-
                       distinctValuesCheckboxes.innerHTML = "";
-
                       result.values.forEach((val) => {
                         const valStr = String(val);
                         const isChecked = activeValues
                           ? activeValues.includes(valStr)
                           : true;
-
                         const label = document.createElement("label");
                         label.style.cssText =
                           "display: flex; align-items: center; gap: 10px; padding: 6px 10px; background: #ffffff; border-radius: 4px; cursor: pointer; border: 1px solid #e2e8f0; font-size: 0.85rem;";
@@ -3462,7 +3148,6 @@ async function initManipulatePage() {
                         `;
                         distinctValuesCheckboxes.appendChild(label);
                       });
-
                       showNotification(
                         `${result.values.length} valeur(s) trouvee(s)`,
                         true,
@@ -3477,7 +3162,6 @@ async function initManipulatePage() {
                       '<p style="color: red;">Erreur lors du chargement.</p>';
                   }
                 });
-
                 attributeButtonsContainer.appendChild(btn);
               });
             }
@@ -3491,7 +3175,6 @@ async function initManipulatePage() {
                   chk.checked = true;
                 });
             };
-
             filterContentContainer.querySelector(
               "#btn-deselect-all-values",
             ).onclick = () => {
@@ -3501,7 +3184,6 @@ async function initManipulatePage() {
                   chk.checked = false;
                 });
             };
-
             filterContentContainer.querySelector(
               "#btn-apply-value-filters",
             ).onclick = () => {
@@ -3515,10 +3197,8 @@ async function initManipulatePage() {
                     newFilters[col].push(chk.value);
                   }
                 });
-
               window._activeValueFilters = newFilters;
               applyValueFilters();
-
               const filterCount = Object.keys(newFilters).length;
               if (filterCount === 0) {
                 showNotification(
@@ -3532,7 +3212,6 @@ async function initManipulatePage() {
                 );
               }
             };
-
             filterContentContainer.querySelector(
               "#btn-reset-value-filters",
             ).onclick = () => {
@@ -3546,6 +3225,7 @@ async function initManipulatePage() {
                 currentManipulateData,
                 resultsContainer,
                 countSpan,
+                currentManipulateTotalCount,
               );
               showNotification("Filtres reinitialises.", true);
             };
@@ -3567,16 +3247,9 @@ async function initManipulatePage() {
                 <h4 style="margin-bottom: 12px; color: var(--text-color); font-weight: bold;">
                   <i class="fas fa-columns"></i> Filtrer les colonnes a afficher
                 </h4>
-                <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1rem;">
-                  Cochez les colonnes que vous souhaitez afficher dans les resultats.
-                </p>
                 <div style="margin-bottom: 12px; display: flex; gap: 8px; flex-wrap: wrap;">
-                  <button id="btn-select-all-cols" class="secondary-button" style="padding: 0.3rem 0.8rem; font-size: 0.8rem;">
-                    Tout cocher
-                  </button>
-                  <button id="btn-deselect-all-cols" class="secondary-button" style="padding: 0.3rem 0.8rem; font-size: 0.8rem;">
-                    Tout decocher
-                  </button>
+                  <button id="btn-select-all-cols" class="secondary-button" style="padding: 0.3rem 0.8rem; font-size: 0.8rem;">Tout cocher</button>
+                  <button id="btn-deselect-all-cols" class="secondary-button" style="padding: 0.3rem 0.8rem; font-size: 0.8rem;">Tout decocher</button>
                 </div>
                 <div id="columns-checkboxes-container" style="display: flex; gap: 8px; flex-wrap: wrap;"></div>
               </div>
@@ -3594,7 +3267,6 @@ async function initManipulatePage() {
               filterContentContainer.querySelector(
                 "#columns-checkboxes-container",
               );
-
             allColumns.forEach((col) => {
               const isChecked = activeCols.includes(col);
               const label = document.createElement("label");
@@ -3606,7 +3278,6 @@ async function initManipulatePage() {
               `;
               columnsCheckboxesContainer.appendChild(label);
             });
-
             filterContentContainer.querySelector(
               "#btn-select-all-cols",
             ).onclick = () => {
@@ -3616,7 +3287,6 @@ async function initManipulatePage() {
                   chk.checked = true;
                 });
             };
-
             filterContentContainer.querySelector(
               "#btn-deselect-all-cols",
             ).onclick = () => {
@@ -3626,7 +3296,6 @@ async function initManipulatePage() {
                   chk.checked = false;
                 });
             };
-
             filterContentContainer.querySelector(
               "#btn-apply-column-filters",
             ).onclick = () => {
@@ -3635,7 +3304,6 @@ async function initManipulatePage() {
                   ".column-filter-chk:checked",
                 ),
               ).map((chk) => chk.value);
-
               if (selectedCols.length === 0) {
                 showNotification(
                   "Selectionnez au moins une colonne a afficher.",
@@ -3643,9 +3311,7 @@ async function initManipulatePage() {
                 );
                 return;
               }
-
               window._activeColumnFilters = selectedCols;
-
               const filteredData = currentManipulateFiltered.map((row) => {
                 const newRow = {};
                 selectedCols.forEach((col) => {
@@ -3653,14 +3319,17 @@ async function initManipulatePage() {
                 });
                 return newRow;
               });
-
-              displayManipulateData(filteredData, resultsContainer, countSpan);
+              displayManipulateData(
+                filteredData,
+                resultsContainer,
+                countSpan,
+                currentManipulateTotalCount,
+              );
               showNotification(
                 `Affichage de ${selectedCols.length} colonne(s).`,
                 true,
               );
             };
-
             filterContentContainer.querySelector(
               "#btn-reset-column-filters",
             ).onclick = () => {
@@ -3674,6 +3343,7 @@ async function initManipulatePage() {
                 currentManipulateFiltered,
                 resultsContainer,
                 countSpan,
+                currentManipulateTotalCount,
               );
               showNotification("Toutes les colonnes sont affichees.", true);
             };
@@ -3682,20 +3352,16 @@ async function initManipulatePage() {
           btnFilterResultsMode.onclick = () => {
             renderFilterResultsMode();
           };
-
           btnFilterColumnsMode.onclick = () => {
             renderFilterColumnsMode();
           };
-
           renderFilterResultsMode();
-
           filtersArea.querySelector("#btn-close-filters").onclick = () => {
             filtersArea.classList.add("hidden");
             filtersArea.style.display = "none";
             btnFilters.style.background = "";
             btnFilters.style.color = "";
           };
-
           this.style.background = "var(--primary, #4f46e5)";
           this.style.color = "white";
         }
@@ -3708,16 +3374,18 @@ async function initManipulatePage() {
 
   function applyValueFilters() {
     if (!currentManipulateData || currentManipulateData.length === 0) return;
-
     const filters = window._activeValueFilters || {};
     const filterKeys = Object.keys(filters);
-
     if (filterKeys.length === 0) {
       currentManipulateFiltered = currentManipulateData;
-      displayManipulateData(currentManipulateData, resultsContainer, countSpan);
+      displayManipulateData(
+        currentManipulateData,
+        resultsContainer,
+        countSpan,
+        currentManipulateTotalCount,
+      );
       return;
     }
-
     const filtered = currentManipulateData.filter((row) => {
       return filterKeys.every((col) => {
         const allowedValues = filters[col];
@@ -3725,10 +3393,13 @@ async function initManipulatePage() {
         return allowedValues.includes(rowValue);
       });
     });
-
     currentManipulateFiltered = filtered;
-    displayManipulateData(filtered, resultsContainer, countSpan);
-
+    displayManipulateData(
+      filtered,
+      resultsContainer,
+      countSpan,
+      currentManipulateTotalCount,
+    );
     if (filtered.length === 0) {
       showNotification(
         "Aucun resultat ne correspond aux filtres selectionnes.",
@@ -3744,7 +3415,6 @@ async function initManipulatePage() {
         showNotification("Veuillez d'abord selectionner une table.", false);
         return;
       }
-
       const isVisible =
         operationsArea && !operationsArea.classList.contains("hidden");
       if (isVisible) {
@@ -3754,7 +3424,6 @@ async function initManipulatePage() {
         this.style.color = "";
         return;
       }
-
       if (searchBarArea) {
         searchBarArea.classList.add("hidden");
         searchBarArea.style.display = "none";
@@ -3763,7 +3432,6 @@ async function initManipulatePage() {
         filtersArea.classList.add("hidden");
         filtersArea.style.display = "none";
       }
-
       operationsArea.classList.remove("hidden");
       operationsArea.style.display = "flex";
       await initAdvancedQuerySelects(currentManipulateTable);
@@ -3779,14 +3447,12 @@ async function initManipulatePage() {
         showNotification("Veuillez d'abord selectionner une table.", false);
         return;
       }
-
       const opType =
         document.getElementById("selected-operation-type")?.value ||
         "SELECT_ALL";
       const attribute = document.getElementById("op-attribute-select")?.value;
       const value = document.getElementById("op-value-input")?.value;
       const groupBy = document.getElementById("op-groupby-select")?.value;
-
       const opNames = {
         SELECT_ALL: "Voir tout",
         DISTINCT: "Valeurs uniques",
@@ -3798,17 +3464,14 @@ async function initManipulatePage() {
         WHERE_LIKE: "Rechercher",
         GROUP_BY: "Grouper",
       };
-
       try {
         await waitForApi();
         const activeDbPath = sessionStorage.getItem("current_db_path");
-
         showNotificationWithProgress(
           `Execution de "${opNames[opType] || opType}"...`,
           30,
           true,
         );
-
         const res = await window.pywebview.api.execute_custom_sql_operation(
           currentManipulateTable,
           opType,
@@ -3817,13 +3480,17 @@ async function initManipulatePage() {
           groupBy,
           activeDbPath,
         );
-
         showNotificationWithProgress("Operation terminee", 100, true);
-
         if (res?.success) {
           currentManipulateData = res.data;
           currentManipulateFiltered = res.data;
-          displayManipulateData(res.data, resultsContainer, countSpan);
+          currentManipulateTotalCount = res.data.length;
+          displayManipulateData(
+            res.data,
+            resultsContainer,
+            countSpan,
+            res.data.length,
+          );
           showNotification(
             `${opNames[opType] || opType} executee : ${res.data.length} resultat(s).`,
             true,
@@ -3849,7 +3516,6 @@ async function initManipulatePage() {
       document.getElementById("op-attribute-select").value = "";
       document.getElementById("op-value-input").value = "";
       document.getElementById("op-groupby-select").value = "";
-
       document.querySelectorAll(".op-btn").forEach((b) => {
         b.style.background = "";
         b.style.color = "";
@@ -3861,11 +3527,9 @@ async function initManipulatePage() {
         firstOpBtn.style.background = "var(--primary-color, #4f46e5)";
         firstOpBtn.style.color = "#ffffff";
       }
-
       if (currentManipulateTable) {
         loadManipulateTableData(currentManipulateTable);
       }
-
       showNotification("Formulaire reinitialise.", true);
     });
   }
@@ -3876,7 +3540,6 @@ async function loadManipulateTableData(tableName) {
     "#manipulate-results-table-container",
   );
   const countSpan = document.querySelector("#manipulate-response-count");
-
   if (!container) return;
 
   try {
@@ -3897,7 +3560,6 @@ async function loadManipulateTableData(tableName) {
       ) {
         const filters = window._activeValueFilters;
         const filterKeys = Object.keys(filters);
-
         const filtered = currentManipulateData.filter((row) => {
           return filterKeys.every((col) => {
             const allowedValues = filters[col];
@@ -3905,7 +3567,6 @@ async function loadManipulateTableData(tableName) {
             return allowedValues.includes(rowValue);
           });
         });
-
         currentManipulateFiltered = filtered;
         displayManipulateData(
           filtered,
@@ -3930,7 +3591,6 @@ async function loadManipulateTableData(tableName) {
   }
 }
 
-// ✅ Affiche les donnees avec indication du total reel
 function displayManipulateData(
   dataArray,
   container,
@@ -3966,22 +3626,9 @@ function displayManipulateData(
   const keys = Object.keys(dataArray[0]);
   let html = "";
 
-  // ✅ Bandeau d'avertissement si tronque
   if (isTruncated) {
     html += `
-      <div style="
-        background: #fff3cd;
-        border: 1px solid #ffc107;
-        border-left: 4px solid #e67e22;
-        padding: 10px 14px;
-        border-radius: 6px;
-        margin-bottom: 12px;
-        color: #856404;
-        font-size: 0.9rem;
-        display: flex;
-        align-items: center;
-        gap: 10px;
-      ">
+      <div style="background: #fff3cd; border: 1px solid #ffc107; border-left: 4px solid #e67e22; padding: 10px 14px; border-radius: 6px; margin-bottom: 12px; color: #856404; font-size: 0.9rem; display: flex; align-items: center; gap: 10px;">
         <i class="fas fa-exclamation-triangle" style="font-size: 1.2rem;"></i>
         <div>
           <strong>Affichage limite :</strong> ${displayedCount} lignes affichees sur <strong>${realTotal}</strong> au total.
@@ -4004,9 +3651,7 @@ function displayManipulateData(
 
   dataArray.forEach((row, idx) => {
     html += `<tr style="border-bottom: 1px solid #e2e8f0;">`;
-
     const rowId = row.rowid || row.id || idx + 1;
-
     html += `
       <td style="padding: 8px 10px; border-right: 1px solid #e2e8f0; text-align: center; white-space: nowrap;">
         <button class="btn-manipulate-edit" data-rowid="${rowId}" title="Modifier" style="background: #f39c12; color: white; border: none; padding: 3px 6px; border-radius: 3px; cursor: pointer; font-size: 0.7rem; margin-right: 3px;">
@@ -4017,7 +3662,6 @@ function displayManipulateData(
         </button>
       </td>
     `;
-
     keys.forEach((k) => {
       html += `<td style="padding: 8px 10px; border-right: 1px solid #e2e8f0;">${escapeHtml(row[k])}</td>`;
     });
@@ -4042,9 +3686,7 @@ function displayManipulateData(
   container.querySelectorAll(".btn-manipulate-delete").forEach((btn) => {
     btn.addEventListener("click", async function () {
       const rowId = parseInt(this.getAttribute("data-rowid"));
-
       if (!confirm(`Supprimer la ligne #${rowId} ?`)) return;
-
       try {
         const activeDbPath = sessionStorage.getItem("current_db_path");
         const res = await window.pywebview.api.delete_table_row(
@@ -4052,7 +3694,6 @@ function displayManipulateData(
           rowId,
           activeDbPath,
         );
-
         if (res && res.success) {
           showNotification("Ligne supprimee avec succes.", true);
           logUserAction(
@@ -4078,16 +3719,13 @@ async function loadManipulateTables() {
   if (!tableSelect) return;
   try {
     await waitForApi();
-
     let activeDbPath = sessionStorage.getItem("current_db_path");
     if (!activeDbPath) {
       const selectEl = document.getElementById("db-file-select");
       activeDbPath = selectEl ? selectEl.value : null;
     }
-
     const tablesRes =
       await window.pywebview.api.get_database_table_names(activeDbPath);
-
     if (tablesRes && tablesRes.success) {
       tableSelect.innerHTML =
         '<option value="">-- Choisir une table --</option>';
@@ -4106,14 +3744,12 @@ async function loadManipulateTables() {
 async function initAdvancedQuerySelects(tableName) {
   const attrSelect = document.querySelector("#op-attribute-select");
   const groupSelect = document.querySelector("#op-groupby-select");
-
   try {
     let activeDbPath = sessionStorage.getItem("current_db_path");
     if (!activeDbPath) {
       const selectEl = document.getElementById("db-file-select");
       activeDbPath = selectEl ? selectEl.value : null;
     }
-
     const structRes =
       await window.pywebview.api.get_database_structure_matrix(activeDbPath);
     const columns = structRes.structure[tableName] || [];
@@ -4128,7 +3764,6 @@ async function initAdvancedQuerySelects(tableName) {
         attrSelect.appendChild(opt);
       });
     }
-
     if (groupSelect) {
       groupSelect.innerHTML = '<option value="">-- Aucun --</option>';
       columns.forEach((col) => {
@@ -4160,7 +3795,7 @@ function openFullScreenModal(titleText, htmlContent) {
       <div style="background: #ffffff; color: #1a1a2e; width: 100vw; height: 100vh; border-radius: 0; display: flex; flex-direction: column; overflow: hidden;">
         <div style="padding: 16px 24px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; background: #f8fafc;">
           <h2 id="modal-title-text" style="margin: 0; font-size: 1.4rem; display: flex; align-items: center; gap: 12px; color: #1a1a2e;">
-            <i class="fas fa-expand" style="color: #4f46e5;"></i> 
+            <i class="fas fa-expand" style="color: #4f46e5;"></i>
             <span style="color: #1a1a2e;">${titleText}</span>
           </h2>
           <button type="button" id="close-fullscreen-modal" style="background: none; border: none; font-size: 2rem; cursor: pointer; color: #1a1a2e;">&times;</button>
@@ -4180,7 +3815,6 @@ function openFullScreenModal(titleText, htmlContent) {
       </div>
     `;
     document.body.appendChild(modalOverlay);
-
     const closeModal = () => {
       modalOverlay.style.display = "none";
     };
@@ -4191,9 +3825,7 @@ function openFullScreenModal(titleText, htmlContent) {
   document
     .getElementById("modal-title-text")
     .querySelector("span").textContent = titleText;
-
   let cleanHtml = htmlContent;
-
   if (cleanHtml.includes("<table")) {
     cleanHtml = cleanHtml.replace(
       /<table/g,
@@ -4209,7 +3841,6 @@ function openFullScreenModal(titleText, htmlContent) {
     );
     cleanHtml = cleanHtml.replace(/<tr/g, '<tr style="background: #ffffff;"');
   }
-
   document.getElementById("fullscreen-modal-body").innerHTML = cleanHtml;
   modalOverlay.style.display = "flex";
 
@@ -4248,7 +3879,6 @@ function openFullScreenModal(titleText, htmlContent) {
         !confirm(`Supprimer ${checkedBoxes.length} element(s) selectionne(s) ?`)
       )
         return;
-
       try {
         const duplicatesToDelete = [];
         checkedBoxes.forEach((chk) => {
@@ -4256,23 +3886,20 @@ function openFullScreenModal(titleText, htmlContent) {
           const rowIndex = chk.getAttribute("data-rowid");
           if (tableName && rowIndex) {
             duplicatesToDelete.push({
-              tableName: tableName,
+              tableName,
               row_index: parseInt(rowIndex),
             });
           }
         });
-
         if (duplicatesToDelete.length === 0) {
           showNotification("Aucun element valide a supprimer.", false);
           return;
         }
-
         const activeDbPath = sessionStorage.getItem("current_db_path");
         const result = await window.pywebview.api.delete_duplicates_batch(
           duplicatesToDelete,
           activeDbPath,
         );
-
         if (result && result.success) {
           showNotification(
             `${result.deleted} element(s) supprime(s) en ${result.elapsed_seconds}s.`,
@@ -4322,7 +3949,6 @@ function openStatisticalQueriesModal() {
     showNotification("Veuillez d'abord ouvrir une base de donnees.", false);
     return;
   }
-
   const overlay = document.createElement("div");
   overlay.className = "edit-modal-overlay";
   overlay.style.zIndex = "99998";
@@ -4335,47 +3961,24 @@ function openStatisticalQueriesModal() {
         </h3>
         <button type="button" id="close-stats-modal" style="background: none; border: none; font-size: 2rem; cursor: pointer; color: #1a1a2e;">&times;</button>
       </div>
-      <p style="color: #64748b; margin-bottom: 1.5rem;">
-        Selectionnez une requete pour obtenir des statistiques sur vos donnees.
-      </p>
+      <p style="color: #64748b; margin-bottom: 1.5rem;">Selectionnez une requete pour obtenir des statistiques sur vos donnees.</p>
       <div id="stats-query-buttons" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; margin-bottom: 1.5rem;">
-        <button class="stat-query-btn" data-query="femmes_par_tranche_age" style="padding: 12px; border: 2px solid #4f46e5; border-radius: 8px; background: #ffffff; color: #4f46e5; font-weight: 600; cursor: pointer; text-align: left;">
-          <i class="fas fa-female"></i> Femmes par tranche d'age
-        </button>
-        <button class="stat-query-btn" data-query="personnes_par_commune" style="padding: 12px; border: 2px solid #4f46e5; border-radius: 8px; background: #ffffff; color: #4f46e5; font-weight: 600; cursor: pointer; text-align: left;">
-          <i class="fas fa-map-marker-alt"></i> Personnes par commune
-        </button>
-        <button class="stat-query-btn" data-query="personnes_par_lieu" style="padding: 12px; border: 2px solid #4f46e5; border-radius: 8px; background: #ffffff; color: #4f46e5; font-weight: 600; cursor: pointer; text-align: left;">
-          <i class="fas fa-location-dot"></i> Personnes par lieu (fkt)
-        </button>
-        <button class="stat-query-btn" data-query="superficie_par_personne" style="padding: 12px; border: 2px solid #4f46e5; border-radius: 8px; background: #ffffff; color: #4f46e5; font-weight: 600; cursor: pointer; text-align: left;">
-          <i class="fas fa-ruler-combined"></i> Superficie par personne
-        </button>
-        <button class="stat-query-btn" data-query="hommes_femmes" style="padding: 12px; border: 2px solid #4f46e5; border-radius: 8px; background: #ffffff; color: #4f46e5; font-weight: 600; cursor: pointer; text-align: left;">
-          <i class="fas fa-venus-mars"></i> Repartition Hommes / Femmes
-        </button>
-        <button class="stat-query-btn" data-query="personnes_par_filiere" style="padding: 12px; border: 2px solid #4f46e5; border-radius: 8px; background: #ffffff; color: #4f46e5; font-weight: 600; cursor: pointer; text-align: left;">
-          <i class="fas fa-seedling"></i> Personnes par filiere
-        </button>
-        <button class="stat-query-btn" data-query="personnes_par_categorisation" style="padding: 12px; border: 2px solid #4f46e5; border-radius: 8px; background: #ffffff; color: #4f46e5; font-weight: 600; cursor: pointer; text-align: left;">
-          <i class="fas fa-users"></i> Personnes par categorisation EAF
-        </button>
-        <button class="stat-query-btn" data-query="age_moyen" style="padding: 12px; border: 2px solid #4f46e5; border-radius: 8px; background: #ffffff; color: #4f46e5; font-weight: 600; cursor: pointer; text-align: left;">
-          <i class="fas fa-birthday-cake"></i> Age moyen des personnes
-        </button>
-        <button class="stat-query-btn" data-query="superficie_totale" style="padding: 12px; border: 2px solid #4f46e5; border-radius: 8px; background: #ffffff; color: #4f46e5; font-weight: 600; cursor: pointer; text-align: left;">
-          <i class="fas fa-chart-area"></i> Superficie totale
-        </button>
+        <button class="stat-query-btn" data-query="femmes_par_tranche_age" style="padding: 12px; border: 2px solid #4f46e5; border-radius: 8px; background: #ffffff; color: #4f46e5; font-weight: 600; cursor: pointer; text-align: left;"><i class="fas fa-female"></i> Femmes par tranche d'age</button>
+        <button class="stat-query-btn" data-query="personnes_par_commune" style="padding: 12px; border: 2px solid #4f46e5; border-radius: 8px; background: #ffffff; color: #4f46e5; font-weight: 600; cursor: pointer; text-align: left;"><i class="fas fa-map-marker-alt"></i> Personnes par commune</button>
+        <button class="stat-query-btn" data-query="personnes_par_lieu" style="padding: 12px; border: 2px solid #4f46e5; border-radius: 8px; background: #ffffff; color: #4f46e5; font-weight: 600; cursor: pointer; text-align: left;"><i class="fas fa-location-dot"></i> Personnes par lieu (fkt)</button>
+        <button class="stat-query-btn" data-query="superficie_par_personne" style="padding: 12px; border: 2px solid #4f46e5; border-radius: 8px; background: #ffffff; color: #4f46e5; font-weight: 600; cursor: pointer; text-align: left;"><i class="fas fa-ruler-combined"></i> Superficie par personne</button>
+        <button class="stat-query-btn" data-query="hommes_femmes" style="padding: 12px; border: 2px solid #4f46e5; border-radius: 8px; background: #ffffff; color: #4f46e5; font-weight: 600; cursor: pointer; text-align: left;"><i class="fas fa-venus-mars"></i> Repartition Hommes / Femmes</button>
+        <button class="stat-query-btn" data-query="personnes_par_filiere" style="padding: 12px; border: 2px solid #4f46e5; border-radius: 8px; background: #ffffff; color: #4f46e5; font-weight: 600; cursor: pointer; text-align: left;"><i class="fas fa-seedling"></i> Personnes par filiere</button>
+        <button class="stat-query-btn" data-query="personnes_par_categorisation" style="padding: 12px; border: 2px solid #4f46e5; border-radius: 8px; background: #ffffff; color: #4f46e5; font-weight: 600; cursor: pointer; text-align: left;"><i class="fas fa-users"></i> Personnes par categorisation EAF</button>
+        <button class="stat-query-btn" data-query="age_moyen" style="padding: 12px; border: 2px solid #4f46e5; border-radius: 8px; background: #ffffff; color: #4f46e5; font-weight: 600; cursor: pointer; text-align: left;"><i class="fas fa-birthday-cake"></i> Age moyen des personnes</button>
+        <button class="stat-query-btn" data-query="superficie_totale" style="padding: 12px; border: 2px solid #4f46e5; border-radius: 8px; background: #ffffff; color: #4f46e5; font-weight: 600; cursor: pointer; text-align: left;"><i class="fas fa-chart-area"></i> Superficie totale</button>
       </div>
       <div id="stats-query-params" style="margin-bottom: 1.5rem; display: none;"></div>
       <div id="stats-query-results" style="background: #f8fafc; border-radius: 8px; padding: 1rem; min-height: 100px; color: #334155;">
-        <p style="color: #64748b; text-align: center;">
-          <i class="fas fa-info-circle"></i> Selectionnez une requete pour afficher les resultats.
-        </p>
+        <p style="color: #64748b; text-align: center;"><i class="fas fa-info-circle"></i> Selectionnez une requete pour afficher les resultats.</p>
       </div>
     </div>
   `;
-
   document.body.appendChild(overlay);
 
   const closeModal = () => overlay.remove();
@@ -4404,13 +4007,9 @@ function openStatisticalQueriesModal() {
         paramsContainer.style.display = "block";
         paramsContainer.innerHTML = `
           <div style="background: #e0e7ff; padding: 12px; border-radius: 6px; margin-bottom: 12px;">
-            <label style="display: block; font-weight: 600; margin-bottom: 6px; color: #1a1a2e;">
-              Age minimum :
-            </label>
+            <label style="display: block; font-weight: 600; margin-bottom: 6px; color: #1a1a2e;">Age minimum :</label>
             <input type="number" id="stat-age-min" value="0" min="0" max="120" style="padding: 8px; border-radius: 4px; border: 1px solid #cbd5e1; width: 100px; margin-right: 12px;" />
-            <label style="display: block; font-weight: 600; margin-bottom: 6px; margin-top: 8px; color: #1a1a2e;">
-              Age maximum :
-            </label>
+            <label style="display: block; font-weight: 600; margin-bottom: 6px; margin-top: 8px; color: #1a1a2e;">Age maximum :</label>
             <input type="number" id="stat-age-max" value="120" min="0" max="120" style="padding: 8px; border-radius: 4px; border: 1px solid #cbd5e1; width: 100px;" />
           </div>
         `;
@@ -4422,7 +4021,6 @@ function openStatisticalQueriesModal() {
       try {
         await waitForApi();
         const activeDbPath = sessionStorage.getItem("current_db_path");
-
         const params = {};
         if (queryType === "femmes_par_tranche_age") {
           params.age_min = parseInt(
@@ -4434,7 +4032,6 @@ function openStatisticalQueriesModal() {
         } else if (queryType === "personnes_par_lieu") {
           params.lieu_type = "fkt";
         }
-
         const result = await window.pywebview.api.execute_statistical_query(
           queryType,
           params,
@@ -4450,7 +4047,6 @@ function openStatisticalQueriesModal() {
             html += `<th style="padding: 10px; text-align: left; border: 1px solid #e2e8f0;">${escapeHtml(k)}</th>`;
           });
           html += "</tr></thead><tbody>";
-
           result.data.forEach((row, idx) => {
             html += `<tr style="background: ${idx % 2 === 0 ? "#ffffff" : "#f8fafc"};">`;
             Object.values(row).forEach((val) => {
@@ -4459,18 +4055,7 @@ function openStatisticalQueriesModal() {
             html += "</tr>";
           });
           html += "</tbody></table>";
-
           resultsContainer.innerHTML = html;
-
-          if (queryType === "femmes_par_tranche_age") {
-            const minInput = overlay.querySelector("#stat-age-min");
-            const maxInput = overlay.querySelector("#stat-age-max");
-            if (minInput)
-              minInput.addEventListener("change", () => btn.click());
-            if (maxInput)
-              maxInput.addEventListener("change", () => btn.click());
-          }
-
           logUserAction(`Requete statistique : ${queryType}`);
         } else {
           resultsContainer.innerHTML =
@@ -4483,6 +4068,336 @@ function openStatisticalQueriesModal() {
       }
     });
   });
+}
+
+// ============================================
+// A PROPOS / MISES A JOUR / CONTACT
+// ============================================
+async function getAppInfo() {
+  if (appInfoCache) return appInfoCache;
+  try {
+    await waitForApi();
+    const info = await window.pywebview.api.get_app_info();
+    if (info && info.success) {
+      appInfoCache = info;
+      return info;
+    }
+  } catch (e) {
+    console.error("Erreur get_app_info:", e);
+  }
+  return null;
+}
+
+async function updateFooterVersion() {
+  try {
+    const info = await getAppInfo();
+    const el = document.getElementById("footer-version");
+    if (el && info) el.textContent = info.app_version || "1.0.0";
+  } catch (e) {}
+}
+
+// --- Modale A PROPOS ---
+async function showAboutModal() {
+  const info = await getAppInfo();
+  const appName = info?.app_name || "xl2db";
+  const appVersion = info?.app_version || "1.0.0";
+  const devName = info?.developer_name || "DadaRaBed";
+  const devEmail = info?.developer_email || "nanoonadjah3@gmail.com";
+  const githubRepo = info?.github_repo || "DadaRaBed/xl2db_stage";
+  const pythonVersion = info?.python_version || "-";
+  const platform = info?.platform || "-";
+
+  const overlay = document.createElement("div");
+  overlay.className = "edit-modal-overlay";
+  overlay.style.zIndex = "99997";
+
+  overlay.innerHTML = `
+    <div style="background: #ffffff; border-radius: 12px; padding: 0; max-width: 720px; width: 95%; max-height: 88vh; overflow: hidden; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3); display: flex; flex-direction: column;">
+      <div style="background: linear-gradient(135deg, #4f46e5, #818cf8); color: white; padding: 24px; display: flex; align-items: center; gap: 16px;">
+        <div style="width: 60px; height: 60px; background: rgba(255,255,255,0.2); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 1.8rem; font-weight: 700;">XL</div>
+        <div style="flex: 1;">
+          <h2 style="margin: 0 0 4px 0; font-size: 1.6rem;">${escapeHtml(appName)}</h2>
+          <div style="opacity: 0.9; font-size: 0.95rem;">Version ${escapeHtml(appVersion)} - Expert Edition</div>
+        </div>
+        <button type="button" id="close-about-modal" style="background: rgba(255,255,255,0.2); border: none; color: white; font-size: 1.5rem; cursor: pointer; width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center;">&times;</button>
+      </div>
+
+      <div style="padding: 24px; overflow-y: auto; flex: 1;">
+        <h3 style="margin: 0 0 12px 0; color: #1a1a2e; display: flex; align-items: center; gap: 8px; font-size: 1.1rem;">
+          <i class="fas fa-book" style="color: #4f46e5;"></i> Guide de l'application
+        </h3>
+
+        <div style="background: #f8fafc; border-radius: 8px; padding: 16px; margin-bottom: 24px; border-left: 4px solid #4f46e5;">
+          <div style="margin-bottom: 14px;">
+            <strong style="color: #4f46e5; display: block; margin-bottom: 4px;"><i class="fas fa-file-import"></i> 1. Importer un fichier Excel</strong>
+            <div style="color: #475569; font-size: 0.9rem;">Convertissez un fichier Excel (.xlsx, .xls) en base de donnees SQLite. Chaque feuille devient une table.</div>
+          </div>
+          <div style="margin-bottom: 14px;">
+            <strong style="color: #4f46e5; display: block; margin-bottom: 4px;"><i class="fas fa-folder-open"></i> 2. Travailler avec une base existante</strong>
+            <div style="color: #475569; font-size: 0.9rem;">Ouvrez une base de donnees existante pour la manipuler, chercher les doublons, ou l'exporter vers Excel.</div>
+          </div>
+          <div style="margin-bottom: 14px;">
+            <strong style="color: #4f46e5; display: block; margin-bottom: 4px;"><i class="fas fa-clone"></i> 3. Trouver les doublons</strong>
+            <div style="color: #475569; font-size: 0.9rem;">Detectez les doublons avec deux algorithmes : <em>General</em> (toutes les colonnes) ou <em>CIN + NOM + COMMUNE + FKT</em>. Supprimez en masse ou manuellement.</div>
+          </div>
+          <div style="margin-bottom: 14px;">
+            <strong style="color: #4f46e5; display: block; margin-bottom: 4px;"><i class="fas fa-users"></i> 4. Creer une liste mere</strong>
+            <div style="color: #475569; font-size: 0.9rem;">Copiez TOUTES les lignes de TOUTES les tables dans une seule table <code>listes_meres</code>, avec tracabilite.</div>
+          </div>
+          <div style="margin-bottom: 14px;">
+            <strong style="color: #4f46e5; display: block; margin-bottom: 4px;"><i class="fas fa-sliders-h"></i> 5. Manipuler les donnees</strong>
+            <div style="color: #475569; font-size: 0.9rem;">Filtrez, recherchez, modifiez, supprimez. Utilisez les requetes statistiques pour analyser vos donnees.</div>
+          </div>
+          <div>
+            <strong style="color: #4f46e5; display: block; margin-bottom: 4px;"><i class="fas fa-file-excel"></i> 6. Exporter vers Excel</strong>
+            <div style="color: #475569; font-size: 0.9rem;">Exportez vos tables ou resultats vers Excel avec une mise en forme professionnelle automatique.</div>
+          </div>
+        </div>
+
+        <h3 style="margin: 0 0 12px 0; color: #1a1a2e; display: flex; align-items: center; gap: 8px; font-size: 1.1rem;">
+          <i class="fas fa-user-circle" style="color: #4f46e5;"></i> A propos du developpeur
+        </h3>
+        <div style="background: #f8fafc; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+          <div style="font-size: 1rem; font-weight: 600; color: #1a1a2e; margin-bottom: 8px;">${escapeHtml(devName)}</div>
+          <div style="color: #475569; font-size: 0.9rem; margin-bottom: 12px;">
+            Developpeur de l'application ${escapeHtml(appName)}. N'hesitez pas a me contacter pour toute question, suggestion ou signalement de bug.
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px; color: #475569; font-size: 0.9rem; margin-bottom: 8px;">
+            <i class="fas fa-envelope" style="color: #4f46e5; width: 18px;"></i>
+            <a href="mailto:${escapeHtml(devEmail)}" style="color: #4f46e5; text-decoration: none;">${escapeHtml(devEmail)}</a>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px; color: #475569; font-size: 0.9rem;">
+            <i class="fab fa-github" style="color: #4f46e5; width: 18px;"></i>
+            <a href="https://github.com/${escapeHtml(githubRepo)}" style="color: #4f46e5; text-decoration: none;" onclick="window.pywebview.api.open_url_in_browser('https://github.com/${escapeHtml(githubRepo)}'); return false;">
+              github.com/${escapeHtml(githubRepo)}
+            </a>
+          </div>
+        </div>
+
+        <details style="background: #f1f5f9; border-radius: 8px; padding: 12px 16px;">
+          <summary style="cursor: pointer; font-weight: 600; color: #475569; font-size: 0.9rem;">
+            <i class="fas fa-cog"></i> Informations techniques
+          </summary>
+          <div style="margin-top: 12px; font-size: 0.85rem; color: #64748b;">
+            <div><strong>Version :</strong> ${escapeHtml(appVersion)}</div>
+            <div><strong>Python :</strong> ${escapeHtml(pythonVersion)}</div>
+            <div><strong>Plateforme :</strong> ${escapeHtml(platform)}</div>
+            <div><strong>Mode :</strong> ${info?.frozen ? "EXE (PyInstaller)" : "DEV"}</div>
+          </div>
+        </details>
+      </div>
+
+      <div style="padding: 16px 24px; border-top: 1px solid #e2e8f0; background: #f8fafc; display: flex; justify-content: flex-end; gap: 10px;">
+        <button type="button" id="btn-close-about" style="padding: 0.6rem 1.5rem; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; background: #6c757d; color: white;">Fermer</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.querySelector("#close-about-modal").onclick = close;
+  overlay.querySelector("#btn-close-about").onclick = close;
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) close();
+  });
+}
+
+// --- Modale MISES A JOUR ---
+async function checkForUpdates() {
+  const overlay = document.createElement("div");
+  overlay.className = "edit-modal-overlay";
+  overlay.style.zIndex = "99997";
+
+  overlay.innerHTML = `
+    <div style="background: #ffffff; border-radius: 12px; padding: 2rem; max-width: 520px; width: 90%; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3); text-align: center;">
+      <div id="update-content">
+        <i class="fas fa-spinner fa-spin" style="font-size: 3rem; color: #4f46e5; margin-bottom: 1rem;"></i>
+        <h3 style="margin: 0 0 0.5rem 0; color: #1a1a2e;">Verification des mises a jour...</h3>
+        <p style="color: #64748b;">Connexion au serveur, veuillez patienter.</p>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  const close = () => overlay.remove();
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) close();
+  });
+
+  const content = overlay.querySelector("#update-content");
+
+  try {
+    await waitForApi();
+    const result = await window.pywebview.api.check_for_updates();
+
+    if (!result || !result.success) {
+      content.innerHTML = `
+        <i class="fas fa-exclamation-triangle" style="font-size: 3rem; color: #f39c12; margin-bottom: 1rem;"></i>
+        <h3 style="margin: 0 0 0.5rem 0; color: #1a1a2e;">Verification impossible</h3>
+        <p style="color: #64748b; margin-bottom: 1.5rem;">${escapeHtml(result?.message || "Erreur inconnue.")}</p>
+        <button type="button" id="btn-close-updates" style="padding: 0.6rem 1.5rem; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; background: #6c757d; color: white;">Fermer</button>
+      `;
+    } else if (result.up_to_date) {
+      content.innerHTML = `
+        <i class="fas fa-check-circle" style="font-size: 3rem; color: #27ae60; margin-bottom: 1rem;"></i>
+        <h3 style="margin: 0 0 0.5rem 0; color: #1a1a2e;">Vous etes a jour !</h3>
+        <p style="color: #64748b; margin-bottom: 1.5rem;">
+          Version actuelle : <strong>${escapeHtml(result.current_version)}</strong>
+        </p>
+        <button type="button" id="btn-close-updates" style="padding: 0.6rem 1.5rem; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; background: #27ae60; color: white;">Fermer</button>
+      `;
+    } else {
+      content.innerHTML = `
+        <i class="fas fa-download" style="font-size: 3rem; color: #4f46e5; margin-bottom: 1rem;"></i>
+        <h3 style="margin: 0 0 0.5rem 0; color: #1a1a2e;">Nouvelle version disponible !</h3>
+        <p style="color: #64748b; margin-bottom: 0.5rem;">
+          Version actuelle : <strong>${escapeHtml(result.current_version)}</strong>
+        </p>
+        <p style="color: #4f46e5; font-weight: 600; margin-bottom: 1rem;">
+          Nouvelle version : <strong>${escapeHtml(result.latest_version)}</strong>
+        </p>
+        ${
+          result.release_notes
+            ? `
+          <div style="text-align: left; background: #f8fafc; border-radius: 6px; padding: 12px; margin-bottom: 1rem; max-height: 200px; overflow-y: auto; font-size: 0.85rem; color: #475569;">
+            <strong style="display: block; margin-bottom: 6px; color: #1a1a2e;">Notes de version :</strong>
+            <pre style="white-space: pre-wrap; word-wrap: break-word; font-family: inherit; margin: 0;">${escapeHtml(result.release_notes)}</pre>
+          </div>
+        `
+            : ""
+        }
+        <div style="display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
+          <button type="button" id="btn-download-update" style="padding: 0.6rem 1.5rem; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; background: #4f46e5; color: white;">
+            <i class="fas fa-download"></i> Telecharger
+          </button>
+          <button type="button" id="btn-close-updates" style="padding: 0.6rem 1.5rem; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; background: #6c757d; color: white;">Plus tard</button>
+        </div>
+      `;
+
+      const downloadBtn = content.querySelector("#btn-download-update");
+      if (downloadBtn) {
+        downloadBtn.onclick = () => {
+          window.pywebview.api.open_url_in_browser(result.download_url);
+        };
+      }
+    }
+
+    const closeBtn = content.querySelector("#btn-close-updates");
+    if (closeBtn) closeBtn.onclick = close;
+  } catch (err) {
+    console.error(err);
+    content.innerHTML = `
+      <i class="fas fa-times-circle" style="font-size: 3rem; color: #dc3545; margin-bottom: 1rem;"></i>
+      <h3 style="margin: 0 0 0.5rem 0; color: #1a1a2e;">Erreur</h3>
+      <p style="color: #64748b; margin-bottom: 1.5rem;">${escapeHtml(err.message || "Impossible de verifier.")}</p>
+      <button type="button" id="btn-close-updates" style="padding: 0.6rem 1.5rem; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; background: #6c757d; color: white;">Fermer</button>
+    `;
+    const closeBtn = content.querySelector("#btn-close-updates");
+    if (closeBtn) closeBtn.onclick = close;
+  }
+}
+
+// --- Modale NOUS CONTACTER ---
+function showContactModal() {
+  const overlay = document.createElement("div");
+  overlay.className = "edit-modal-overlay";
+  overlay.style.zIndex = "99997";
+
+  overlay.innerHTML = `
+    <div style="background: #ffffff; border-radius: 12px; padding: 0; max-width: 560px; width: 95%; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3); overflow: hidden;">
+      <div style="background: linear-gradient(135deg, #4f46e5, #818cf8); color: white; padding: 20px 24px; display: flex; align-items: center; justify-content: space-between;">
+        <h3 style="margin: 0; font-size: 1.2rem; display: flex; align-items: center; gap: 10px;">
+          <i class="fas fa-envelope"></i> Nous contacter
+        </h3>
+        <button type="button" id="close-contact-modal" style="background: rgba(255,255,255,0.2); border: none; color: white; font-size: 1.5rem; cursor: pointer; width: 32px; height: 32px; border-radius: 50%;">&times;</button>
+      </div>
+
+      <div style="padding: 24px;">
+        <p style="color: #64748b; font-size: 0.9rem; margin-bottom: 1.5rem;">
+          Envoyez un email au developpeur (DadaRaBed). Nous vous repondrons dans les plus brefs delais.
+        </p>
+
+        <div class="form-group" style="margin-bottom: 1rem;">
+          <label style="display: block; font-weight: 600; margin-bottom: 6px; color: #334155; font-size: 0.9rem;">Votre email (optionnel) :</label>
+          <input type="email" id="contact-email" placeholder="votre.email@example.com" style="width: 100%; padding: 0.6rem; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.9rem; box-sizing: border-box;" />
+        </div>
+
+        <div class="form-group" style="margin-bottom: 1rem;">
+          <label style="display: block; font-weight: 600; margin-bottom: 6px; color: #334155; font-size: 0.9rem;">Sujet :</label>
+          <input type="text" id="contact-subject" placeholder="Sujet de votre message" value="[xl2db] Demande de contact" style="width: 100%; padding: 0.6rem; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.9rem; box-sizing: border-box;" />
+        </div>
+
+        <div class="form-group" style="margin-bottom: 1rem;">
+          <label style="display: block; font-weight: 600; margin-bottom: 6px; color: #334155; font-size: 0.9rem;">Message :</label>
+          <textarea id="contact-message" rows="6" placeholder="Decrivez votre demande, question ou suggestion..." style="width: 100%; padding: 0.6rem; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.9rem; box-sizing: border-box; font-family: inherit; resize: vertical;"></textarea>
+        </div>
+
+        <div id="contact-message-status" style="margin-bottom: 1rem;"></div>
+
+        <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 1.5rem;">
+          <button type="button" id="btn-cancel-contact" style="padding: 0.6rem 1.5rem; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; background: #6c757d; color: white;">Annuler</button>
+          <button type="button" id="btn-send-contact" style="padding: 0.6rem 1.5rem; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; background: #4f46e5; color: white;">
+            <i class="fas fa-paper-plane"></i> Envoyer
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  const close = () => overlay.remove();
+  overlay.querySelector("#close-contact-modal").onclick = close;
+  overlay.querySelector("#btn-cancel-contact").onclick = close;
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) close();
+  });
+
+  overlay.querySelector("#btn-send-contact").onclick = async () => {
+    const email = overlay.querySelector("#contact-email").value.trim();
+    const subject = overlay.querySelector("#contact-subject").value.trim();
+    const message = overlay.querySelector("#contact-message").value.trim();
+    const statusEl = overlay.querySelector("#contact-message-status");
+
+    if (!message) {
+      statusEl.innerHTML =
+        '<p style="color: #dc3545; font-size: 0.9rem;"><i class="fas fa-exclamation-circle"></i> Veuillez ecrire un message.</p>';
+      return;
+    }
+
+    statusEl.innerHTML =
+      '<p style="color: #4f46e5; font-size: 0.9rem;"><i class="fas fa-spinner fa-spin"></i> Envoi en cours...</p>';
+
+    try {
+      await waitForApi();
+      const result = await window.pywebview.api.send_contact_email(
+        subject,
+        message,
+        email,
+      );
+
+      if (result && result.success) {
+        statusEl.innerHTML =
+          '<p style="color: #27ae60; font-size: 0.9rem;"><i class="fas fa-check-circle"></i> ' +
+          escapeHtml(result.message) +
+          "</p>";
+        logUserAction("Envoi d'un message de contact");
+        setTimeout(() => {
+          close();
+          showNotification("Merci ! Votre message a ete transmis.", true);
+        }, 1500);
+      } else {
+        statusEl.innerHTML =
+          '<p style="color: #dc3545; font-size: 0.9rem;"><i class="fas fa-times-circle"></i> ' +
+          escapeHtml(result?.message || "Erreur lors de l'envoi.") +
+          "</p>";
+      }
+    } catch (err) {
+      console.error(err);
+      statusEl.innerHTML =
+        '<p style="color: #dc3545; font-size: 0.9rem;"><i class="fas fa-times-circle"></i> Erreur : ' +
+        escapeHtml(err.message) +
+        "</p>";
+    }
+  };
 }
 
 // ============================================
@@ -4507,22 +4422,17 @@ function initNewFeatures() {
   }
 
   const btnStats = document.getElementById("btn-generate-stats");
-  if (btnStats) {
-    btnStats.addEventListener("click", generateStatistics);
-  }
+  if (btnStats) btnStats.addEventListener("click", generateStatistics);
 
   const btnChartNom = document.getElementById("btn-chart-nom");
   if (btnChartNom)
     btnChartNom.addEventListener("click", () => generateChart("nom"));
-
   const btnChartCin = document.getElementById("btn-chart-cin");
   if (btnChartCin)
     btnChartCin.addEventListener("click", () => generateChart("cin"));
-
   const btnChartRegion = document.getElementById("btn-chart-region");
   if (btnChartRegion)
     btnChartRegion.addEventListener("click", () => generateChart("region"));
-
   const btnChartAll = document.getElementById("btn-chart-all");
   if (btnChartAll) {
     btnChartAll.addEventListener("click", () => {
@@ -4602,9 +4512,45 @@ function initNewFeatures() {
     btnOpenStats.addEventListener("click", openStatisticalQueriesModal);
   }
 
+  // Boutons "Precedent" dans les topbars
   document.querySelectorAll(".btn-back-global").forEach((btn) => {
     btn.addEventListener("click", goBack);
   });
+
+  // Boutons A propos / Mises a jour / Contact (dans les menus burger)
+  document.addEventListener("click", (e) => {
+    if (e.target.closest(".about-global-btn")) {
+      e.preventDefault();
+      showAboutModal();
+      document
+        .querySelectorAll(".user-menu")
+        .forEach((m) => m.classList.add("hidden"));
+    }
+    if (e.target.closest(".updates-global-btn")) {
+      e.preventDefault();
+      checkForUpdates();
+      document
+        .querySelectorAll(".user-menu")
+        .forEach((m) => m.classList.add("hidden"));
+    }
+    if (e.target.closest(".contact-global-btn")) {
+      e.preventDefault();
+      showContactModal();
+      document
+        .querySelectorAll(".user-menu")
+        .forEach((m) => m.classList.add("hidden"));
+    }
+  });
+
+  // Footer
+  const footerCheckUpdates = document.getElementById("footer-check-updates");
+  if (footerCheckUpdates) {
+    footerCheckUpdates.addEventListener("click", checkForUpdates);
+  }
+  const footerContact = document.getElementById("footer-contact");
+  if (footerContact) {
+    footerContact.addEventListener("click", showContactModal);
+  }
 }
 
 // ============================================
@@ -4617,7 +4563,6 @@ async function exportResultsToExcel() {
   if (!container) return;
   const table = container.querySelector("table");
   if (!table) return;
-
   try {
     const headers = [];
     const data = [];
@@ -4628,7 +4573,6 @@ async function exportResultsToExcel() {
         if (text !== "Actions") headers.push(text);
       });
     }
-
     const tbody = table.querySelector("tbody");
     if (tbody) {
       tbody.querySelectorAll("tr").forEach((row) => {
@@ -4645,15 +4589,12 @@ async function exportResultsToExcel() {
         data.push(rowData);
       });
     }
-
     if (data.length === 0) {
       showNotification("Aucune donnee a exporter.", false);
       return;
     }
-
     const result = await window.pywebview.api.select_excel_export_file();
     if (!result || !result.success) return;
-
     showNotificationWithProgress("Export vers Excel en cours...", 30, true);
     const exportResult = await window.pywebview.api.generate_excel_from_data(
       result.file_path,
@@ -4661,7 +4602,6 @@ async function exportResultsToExcel() {
       headers,
     );
     showNotificationWithProgress("Export termine.", 100, true);
-
     if (exportResult && exportResult.success) {
       showNotification(`Excel exporte : ${result.file_path}`, true);
       logUserAction(`Export des resultats vers Excel`);
@@ -4684,47 +4624,32 @@ async function exportResultsToPDF() {
   if (!container) return;
   const table = container.querySelector("table");
   if (!table) return;
-
   try {
     const result = await window.pywebview.api.select_pdf_file();
     if (!result || !result.success) return;
-
     const htmlContent = `
       <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="UTF-8">
-        <title>Export des resultats</title>
-        <style>
-          body { font-family: Arial, sans-serif; padding: 40px; }
-          h1 { color: #4f46e5; border-bottom: 3px solid #4f46e5; padding-bottom: 10px; }
-          table { width: 100%; border-collapse: collapse; margin: 20px 0; font-size: 11px; }
-          th { background: #4f46e5; color: white; padding: 10px; text-align: left; }
-          td { padding: 8px 10px; border-bottom: 1px solid #ddd; }
-          tr:nth-child(even) { background: #f8fafc; }
-          .info { margin-bottom: 20px; color: #666; }
-          .footer { margin-top: 40px; color: #999; font-size: 11px; border-top: 1px solid #eee; padding-top: 20px; text-align: center; }
-        </style>
-      </head>
-      <body>
+      <html><head><meta charset="UTF-8"><title>Export des resultats</title>
+      <style>
+        body { font-family: Arial, sans-serif; padding: 40px; }
+        h1 { color: #4f46e5; border-bottom: 3px solid #4f46e5; padding-bottom: 10px; }
+        table { width: 100%; border-collapse: collapse; margin: 20px 0; font-size: 11px; }
+        th { background: #4f46e5; color: white; padding: 10px; text-align: left; }
+        td { padding: 8px 10px; border-bottom: 1px solid #ddd; }
+        tr:nth-child(even) { background: #f8fafc; }
+      </style></head><body>
         <h1>Export des resultats</h1>
-        <div class="info">
-          <p><strong>Date :</strong> ${new Date().toLocaleString()}</p>
-          <p><strong>Nombre de resultats :</strong> ${table.querySelectorAll("tbody tr").length}</p>
-        </div>
+        <p><strong>Date :</strong> ${new Date().toLocaleString()}</p>
+        <p><strong>Nombre :</strong> ${table.querySelectorAll("tbody tr").length}</p>
         ${table.outerHTML}
-        <div class="footer">Rapport genere par Data Manager</div>
-      </body>
-      </html>
+      </body></html>
     `;
-
     showNotificationWithProgress("Generation du PDF...", 50, true);
     const pdfResult = await window.pywebview.api.generate_pdf_from_html(
       result.file_path,
       htmlContent,
     );
     showNotificationWithProgress("PDF genere.", 100, true);
-
     if (pdfResult && pdfResult.success) {
       showNotification(`PDF exporte : ${result.file_path}`, true);
       logUserAction(`Export des resultats vers PDF`);
@@ -4745,32 +4670,26 @@ async function exportResultsToPDF() {
 // ============================================
 async function generateStatistics() {
   const tableName = currentManipulateTable;
-
   if (!tableName) {
     showNotification("Veuillez selectionner une table.", false);
     return;
   }
-
   const container = document.querySelector("#statistics-container");
   const section = document.querySelector("#statistics-section");
   section.classList.remove("hidden");
   container.innerHTML = "<p>Calcul des statistiques...</p>";
-
   try {
     const activeDbPath = sessionStorage.getItem("current_db_path");
     const stats = await window.pywebview.api.get_table_statistics(
       tableName,
       activeDbPath,
     );
-
     if (!stats || !stats.success) {
       container.innerHTML = `<p style="color: red;">${stats?.message || "Erreur."}</p>`;
       return;
     }
-
     let html =
       '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem;">';
-
     for (const [col, data] of Object.entries(stats.stats)) {
       if (data.type === "numerique") {
         html += `
@@ -4783,8 +4702,7 @@ async function generateStatistics() {
               <span class="label">Maximum :</span><span class="value">${data.max !== null ? data.max : "-"}</span>
               <span class="label">Somme :</span><span class="value">${data.sum !== null ? data.sum : "-"}</span>
             </div>
-          </div>
-        `;
+          </div>`;
       } else {
         html += `
           <div class="stat-card" style="border-left-color: #10b981;">
@@ -4793,11 +4711,9 @@ async function generateStatistics() {
               <span class="label">Valeurs distinctes :</span> <strong>${data.distinct_count}</strong>
               <span class="label" style="margin-left: 1rem;">Total :</span> <strong>${data.total_count}</strong>
             </div>
-          </div>
-        `;
+          </div>`;
       }
     }
-
     html += "</div>";
     container.innerHTML = html;
     showNotification("Statistiques generees.", true);
@@ -4809,19 +4725,16 @@ async function generateStatistics() {
 
 async function generateChart(chartType) {
   const tableName = currentManipulateTable;
-
   if (!tableName) {
     showNotification("Veuillez selectionner une table.", false);
     return;
   }
-
   const section = document.querySelector("#charts-section");
   const container = document.querySelector("#charts-container");
   section.classList.remove("hidden");
 
   let column = "";
   let title = "";
-
   switch (chartType) {
     case "nom":
       column = "nom";
@@ -4842,13 +4755,11 @@ async function generateChart(chartType) {
       await generateChart("region");
       return;
   }
-
   try {
     const activeDbPath = sessionStorage.getItem("current_db_path");
     const struct =
       await window.pywebview.api.get_database_structure_matrix(activeDbPath);
     const columns = struct.structure[tableName] || [];
-
     let foundCol = null;
     for (const col of columns) {
       const colLower = col.toLowerCase();
@@ -4857,60 +4768,35 @@ async function generateChart(chartType) {
         break;
       }
     }
-
     if (!foundCol) {
       showNotification(`Colonne "${column}" non trouvee.`, false);
       return;
     }
-
     const distribution = await window.pywebview.api.get_table_distribution(
       tableName,
       foundCol,
       activeDbPath,
     );
-
     if (!distribution || !distribution.success) {
       showNotification(distribution?.message || "Erreur.", false);
       return;
     }
-
     const data = distribution.distribution;
     const maxCount =
       data.length > 0 ? Math.max(...data.map((d) => d.count)) : 1;
-
-    let chartHtml = `
-      <div class="chart-container">
-        <h4>${title}</h4>
-        <div class="chart-bar-container">
-    `;
-
+    let chartHtml = `<div class="chart-container"><h4>${title}</h4><div class="chart-bar-container">`;
     data.slice(0, 30).forEach((item) => {
       const percentage = maxCount > 0 ? (item.count / maxCount) * 100 : 0;
       chartHtml += `
         <div class="chart-bar-row">
           <span class="chart-bar-label">${escapeHtml(String(item.value).substring(0, 30))}</span>
-          <div class="chart-bar-track">
-            <div class="chart-bar-fill" style="width: ${percentage}%"></div>
-          </div>
+          <div class="chart-bar-track"><div class="chart-bar-fill" style="width: ${percentage}%"></div></div>
           <span class="chart-bar-count">${item.count}</span>
-        </div>
-      `;
+        </div>`;
     });
-
-    chartHtml += `
-        </div>
-        <div style="margin-top: 8px; font-size: 0.75rem; color: var(--text-muted, #64748b);">
-          ${data.length > 30 ? `30 premieres sur ${data.length}` : `${data.length} valeur(s)`}
-        </div>
-      </div>
-    `;
-
-    if (chartType === "all") {
-      container.innerHTML += chartHtml;
-    } else {
-      container.innerHTML = chartHtml;
-    }
-
+    chartHtml += `</div><div style="margin-top: 8px; font-size: 0.75rem; color: var(--text-muted, #64748b);">${data.length > 30 ? `30 premieres sur ${data.length}` : `${data.length} valeur(s)`}</div></div>`;
+    if (chartType === "all") container.innerHTML += chartHtml;
+    else container.innerHTML = chartHtml;
     showNotification(`Graphique "${title}" genere.`, true);
   } catch (error) {
     console.error("Erreur graphique:", error);
@@ -4924,16 +4810,13 @@ function performResultOperation(operation) {
   );
   const output = document.querySelector("#result-operations-output");
   const section = document.querySelector("#result-operations-section");
-
   if (!container) return;
   const table = container.querySelector("table");
   if (!table) {
     showNotification("Aucune donnee a traiter.", false);
     return;
   }
-
   section.classList.remove("hidden");
-
   try {
     const numericData = [];
     const headers = [];
@@ -4944,10 +4827,8 @@ function performResultOperation(operation) {
         if (text !== "Actions") headers.push(text);
       });
     }
-
     const tbody = table.querySelector("tbody");
     if (!tbody) return;
-
     tbody.querySelectorAll("tr").forEach((row) => {
       const cells = row.querySelectorAll("td");
       let headerIdx = 0;
@@ -4963,7 +4844,6 @@ function performResultOperation(operation) {
         }
       });
     });
-
     if (
       numericData.length === 0 ||
       numericData.every((arr) => !arr || arr.length === 0)
@@ -4972,16 +4852,13 @@ function performResultOperation(operation) {
         '<span style="color: orange;">Aucune donnee numerique trouvee.</span>';
       return;
     }
-
     let resultHtml =
       '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px;">';
-
     numericData.forEach((data, idx) => {
       if (!data || data.length === 0) return;
       const colName = headers[idx] || `Colonne ${idx + 1}`;
       let operationResult = "";
       let operationLabel = "";
-
       switch (operation) {
         case "sum":
           operationResult = data.reduce((a, b) => a + b, 0).toFixed(2);
@@ -5014,18 +4891,12 @@ function performResultOperation(operation) {
           operationLabel = "Tri croissant";
           break;
       }
-
       resultHtml += `
         <div style="background: var(--bg-secondary, #f8fafc); padding: 0.75rem; border-radius: 6px; border-left: 3px solid #4f46e5;">
           <div style="font-size: 0.75rem; color: var(--text-muted, #64748b);">${escapeHtml(colName)}</div>
-          <div style="font-size: 1rem; font-weight: 600;">
-            ${operationLabel} : ${operationResult}
-            <span style="font-size: 0.75rem; font-weight: 400; color: var(--text-muted, #64748b);">(n=${data.length})</span>
-          </div>
-        </div>
-      `;
+          <div style="font-size: 1rem; font-weight: 600;">${operationLabel} : ${operationResult} <span style="font-size: 0.75rem; font-weight: 400; color: var(--text-muted, #64748b);">(n=${data.length})</span></div>
+        </div>`;
     });
-
     resultHtml += "</div>";
     output.innerHTML = resultHtml;
     showNotification(`Operation "${operation}" effectuee.`, true);
@@ -5065,6 +4936,7 @@ document.addEventListener("DOMContentLoaded", () => {
   initDuplicatesPage();
   initSqlOperations();
   initNewFeatures();
+  initStatisticalQueries();
 
   if (setupForm) {
     setupForm.addEventListener("submit", async (event) => {
@@ -5239,7 +5111,6 @@ document.addEventListener("DOMContentLoaded", () => {
   if (toggleTablesCheckbox && tablesContainerExisting) {
     toggleTablesCheckbox.checked = false;
     tablesContainerExisting.classList.add("hidden");
-
     toggleTablesCheckbox.addEventListener("change", (e) => {
       if (e.target.checked) {
         tablesContainerExisting.classList.remove("hidden");

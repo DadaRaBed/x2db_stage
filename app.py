@@ -20,6 +20,17 @@ from repositories.system_database import initialize_database, user_count
 
 
 # ============================================================
+# CONFIGURATION APPLICATION
+# ============================================================
+APP_NAME = "xl2db"
+APP_VERSION = "1.0.0"
+DEVELOPER_NAME = "DadaRaBed"
+DEVELOPER_EMAIL = "nanoonadjah3@gmail.com"
+GITHUB_REPO = "DadaRaBed/xl2db_stage"
+GITHUB_API_LATEST = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+
+
+# ============================================================
 # DETECTION DU MODE D'EXECUTION (DEV vs EXE PyInstaller)
 # ============================================================
 def get_app_data_dir() -> Path:
@@ -28,7 +39,7 @@ def get_app_data_dir() -> Path:
             base = Path(os.environ.get("APPDATA", os.path.expanduser("~")))
         else:
             base = Path(os.path.expanduser("~/.local/share"))
-        app_dir = base / "DataManager"
+        app_dir = base / "xl2db"
     else:
         app_dir = Path(__file__).resolve().parent
 
@@ -43,6 +54,19 @@ def get_resource_path(relative_path: str) -> Path:
     else:
         base = Path(__file__).resolve().parent
     return base / relative_path
+
+
+def get_icon_path() -> Optional[str]:
+    """Retourne le chemin vers l'icone selon le mode (dev/exe)."""
+    if getattr(sys, "frozen", False):
+        base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+    else:
+        base = Path(__file__).resolve().parent
+
+    icon = base / "assets" / "icons" / "icon.ico"
+    if icon.exists():
+        return str(icon)
+    return None
 
 
 # ============================================================
@@ -241,6 +265,165 @@ class Api:
             os._exit(0)
         except Exception:
             os._exit(0)
+
+    # ============================================================
+    # A PROPOS / MISES A JOUR / CONTACT
+    # ============================================================
+    def get_app_info(self):
+        return {
+            "success": True,
+            "app_name": APP_NAME,
+            "app_version": APP_VERSION,
+            "developer_name": DEVELOPER_NAME,
+            "developer_email": DEVELOPER_EMAIL,
+            "github_repo": GITHUB_REPO,
+            "python_version": sys.version.split()[0],
+            "platform": sys.platform,
+            "frozen": getattr(sys, "frozen", False),
+        }
+
+    def check_for_updates(self):
+        try:
+            import urllib.request
+            import urllib.error
+
+            req = urllib.request.Request(
+                GITHUB_API_LATEST,
+                headers={"User-Agent": f"{APP_NAME}/{APP_VERSION}"},
+            )
+
+            try:
+                with urllib.request.urlopen(req, timeout=10) as response:
+                    data = json.loads(response.read().decode("utf-8"))
+            except urllib.error.HTTPError as e:
+                if e.code == 404:
+                    return {
+                        "success": True,
+                        "up_to_date": True,
+                        "current_version": APP_VERSION,
+                        "latest_version": APP_VERSION,
+                        "message": "Aucune version publiee sur GitHub pour le moment.",
+                    }
+                return {
+                    "success": False,
+                    "message": f"Erreur HTTP {e.code} lors de la verification.",
+                }
+            except urllib.error.URLError as e:
+                return {
+                    "success": False,
+                    "message": f"Connexion impossible : {e.reason}",
+                }
+
+            latest_version = data.get("tag_name", "").lstrip("v").strip()
+            if not latest_version:
+                return {
+                    "success": False,
+                    "message": "Impossible de determiner la derniere version.",
+                }
+
+            release_notes = data.get("body", "")
+            published_at = data.get("published_at", "")
+            html_url = data.get("html_url", "")
+
+            download_url = html_url
+            for asset in data.get("assets", []):
+                name = asset.get("name", "").lower()
+                if name.endswith(".exe") or name.endswith(".zip"):
+                    download_url = asset.get("browser_download_url", html_url)
+                    break
+
+            def parse_version(v):
+                try:
+                    return tuple(int(x) for x in re.findall(r"\d+", v))
+                except Exception:
+                    return (0,)
+
+            is_up_to_date = parse_version(latest_version) <= parse_version(APP_VERSION)
+
+            return {
+                "success": True,
+                "up_to_date": is_up_to_date,
+                "current_version": APP_VERSION,
+                "latest_version": latest_version,
+                "download_url": download_url,
+                "release_notes": release_notes[:2000],
+                "published_at": published_at,
+                "html_url": html_url,
+            }
+
+        except Exception as e:
+            return {
+                "success": False,
+                "message": f"Impossible de verifier les mises a jour : {e}",
+            }
+
+    def open_url_in_browser(self, url: str):
+        try:
+            import webbrowser
+            webbrowser.open(url)
+            return {"success": True}
+        except Exception as e:
+            return {"success": False, "message": str(e)}
+
+    def send_contact_email(self, subject: str, body: str, user_email: str = ""):
+        try:
+            import smtplib
+            from email.mime.text import MIMEText
+            from email.mime.multipart import MIMEMultipart
+
+            if not subject.strip():
+                subject = f"[{APP_NAME}] Demande de contact"
+
+            app_password = os.environ.get("GMAIL_APP_PASSWORD", "").strip()
+
+            if not app_password:
+                import urllib.parse
+                import webbrowser
+
+                mail_subject = urllib.parse.quote(subject)
+                mail_body = urllib.parse.quote(body)
+                mailto = f"mailto:{DEVELOPER_EMAIL}?subject={mail_subject}&body={mail_body}"
+                webbrowser.open(mailto)
+
+                return {
+                    "success": True,
+                    "method": "mailto",
+                    "message": "Votre client de messagerie a ete ouvert.",
+                }
+
+            smtp_user = DEVELOPER_EMAIL
+            smtp_server = "smtp.gmail.com"
+            smtp_port = 587
+
+            msg = MIMEMultipart()
+            msg["From"] = smtp_user
+            msg["To"] = DEVELOPER_EMAIL
+            msg["Subject"] = subject
+
+            sender_info = f"\n\n---\nEnvoye depuis {APP_NAME} v{APP_VERSION}"
+            if user_email.strip():
+                sender_info += f"\nEmail de l'utilisateur : {user_email}"
+            sender_info += f"\nPlateforme : {sys.platform}"
+
+            msg.attach(MIMEText(body + sender_info, "plain", "utf-8"))
+
+            server = smtplib.SMTP(smtp_server, smtp_port, timeout=15)
+            server.starttls()
+            server.login(smtp_user, app_password)
+            server.send_message(msg)
+            server.quit()
+
+            return {
+                "success": True,
+                "method": "smtp",
+                "message": "Email envoye avec succes au developpeur.",
+            }
+
+        except Exception as e:
+            return {
+                "success": False,
+                "message": f"Erreur lors de l'envoi : {e}",
+            }
 
     # ============================================================
     # ACTIVITES
@@ -1495,7 +1678,6 @@ class Api:
         finally:
             self._safe_close_connection(conn)
 
-    # ✅ NOUVEAU : get_table_rows retourne total_count
     def get_table_rows(self, table_name: str, file_path: str = None, limit: int = 1000):
         conn = None
         try:
@@ -1507,11 +1689,9 @@ class Api:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
 
-            # ✅ Compter le total AVANT la limite
             cursor.execute(f'SELECT COUNT(*) FROM "{table_name}"')
             total_count = cursor.fetchone()[0]
 
-            # ✅ Puis retourner les lignes limitees
             cursor.execute(f'SELECT * FROM "{table_name}" LIMIT {limit}')
             rows = [dict(row) for row in cursor.fetchall()]
 
@@ -1806,7 +1986,7 @@ class Api:
                 return {"success": False, "message": "Aucune base active.", "duplicates": []}
 
             conn = self._connect_db(db_path)
-            conn.row_factory = sqlite3.Row
+            conn.row_factory = sqlite3.Row           
             cursor = conn.cursor()
 
             cursor.execute(f'PRAGMA table_info("{table_name}")')
@@ -2041,20 +2221,8 @@ class Api:
         finally:
             self._safe_close_connection(conn)
 
-    # ✅ NOUVEAU : suppression EN LOT ultra-rapide
+    # ✅ Suppression en lot ultra-rapide
     def delete_duplicates_batch(self, duplicates: List[Dict[str, Any]], file_path: str = None):
-        """
-        Supprime EN LOT une liste de doublons.
-
-        Optimisations :
-        - UNE seule connexion SQLite
-        - UNE seule transaction (BEGIN/COMMIT)
-        - PRAGMA synchronous=OFF + journal_mode=MEMORY
-        - DELETE par batch de 500 avec clause IN
-        - Groupement par table
-
-        Resultat : 30 000 lignes supprimees en 3-8 secondes
-        """
         import time as _time
         start_time = _time.time()
 
@@ -2066,7 +2234,6 @@ class Api:
             if not duplicates:
                 return {"success": True, "total": 0, "deleted": 0, "errors": 0}
 
-            # --- 1. Grouper les rowids par table ---
             grouped: Dict[str, List[int]] = {}
             for dup in duplicates:
                 table_name = dup.get("tableName") or dup.get("table")
@@ -2088,7 +2255,6 @@ class Api:
                     "errors": len(duplicates),
                 }
 
-            # --- 2. Suppression en une seule transaction ---
             conn = self._connect_db(db_path)
             details: Dict[str, int] = {}
             total_deleted = 0
@@ -2097,7 +2263,6 @@ class Api:
             try:
                 cursor = conn.cursor()
 
-                # Optimisations SQLite
                 try:
                     cursor.execute("PRAGMA synchronous=OFF;")
                     cursor.execute("PRAGMA journal_mode=MEMORY;")
@@ -2114,7 +2279,6 @@ class Api:
                     safe_table = str(table_name).replace('"', '""')
                     deleted_for_table = 0
 
-                    # Verifier que la table existe
                     cursor.execute(
                         "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
                         (table_name,),
@@ -2123,7 +2287,6 @@ class Api:
                         total_errors += len(row_ids)
                         continue
 
-                    # DELETE par batch de 500
                     BATCH_SIZE = 500
                     for i in range(0, len(row_ids), BATCH_SIZE):
                         batch = row_ids[i : i + BATCH_SIZE]
@@ -2143,7 +2306,6 @@ class Api:
 
                 cursor.execute("COMMIT;")
 
-                # Restaurer parametres de securite
                 try:
                     cursor.execute("PRAGMA synchronous=NORMAL;")
                     cursor.execute("PRAGMA journal_mode=WAL;")
@@ -2506,7 +2668,7 @@ class Api:
             }
 
     # ============================================================
-    # EXPORTATION EXCEL
+    # EXPORTATION EXCEL (fichier de sortie)
     # ============================================================
     def select_excel_export_file(self):
         global _APP_WINDOW

@@ -3,18 +3,22 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Data Manager - Expert Edition</title>
+    <title>xl2db</title>
     <link rel="stylesheet" href="css/style.css" />
     <link rel="stylesheet" href="fontawesome/css/all.min.css" />
     <style>
       html,
       body {
         width: 100vw;
-        height: 100vh;
+        min-height: 100vh;
         margin: 0;
         padding: 0;
-        overflow: auto;
+        overflow-x: hidden;
       }
+      body {
+        padding-bottom: 50px !important;
+      }
+
       .app-container {
         width: 100% !important;
         max-width: 100% !important;
@@ -34,12 +38,49 @@
         flex: 1;
         width: 100%;
         max-width: 100% !important;
-        padding: 2rem 3rem !important;
+        padding: 2rem 3rem 80px 3rem !important;
         box-sizing: border-box;
       }
+
+      /* ✅ TOPBAR - reorganisee : Accueil a GAUCHE */
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0.75rem 2rem;
+        background: var(--bg-container);
+        border-bottom: 1px solid var(--border-color);
+        gap: 1rem;
+        flex-shrink: 0;
+        backdrop-filter: blur(10px);
+        position: sticky;
+        top: 0;
+        z-index: 100;
+        width: 100%;
+        box-sizing: border-box;
+      }
+      .topbar-brand {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        flex-shrink: 0;
+      }
+      .topbar-left-actions {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        flex-shrink: 0;
+      }
+      .topbar-right {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        margin-left: auto;
+      }
+
       #notification-container {
         position: fixed;
-        bottom: 20px;
+        bottom: 60px;
         right: 20px;
         z-index: 999999;
         display: flex;
@@ -66,6 +107,7 @@
       .hidden {
         display: none !important;
       }
+
       .duplicates-table-wrapper {
         overflow-x: auto;
         overflow-y: auto;
@@ -110,16 +152,7 @@
       .duplicates-table-wrapper tr:hover td {
         background: var(--bg-hover, #f1f5f9);
       }
-      .duplicates-table-wrapper .dup-col-doublon {
-        color: #e74c3c;
-        font-weight: 600;
-        background: rgba(231, 76, 60, 0.05);
-      }
-      .duplicates-table-wrapper .dup-col-reference {
-        color: #27ae60;
-        font-weight: 600;
-        background: rgba(39, 174, 96, 0.05);
-      }
+
       .dup-algorithm-selector {
         display: flex;
         gap: 0.75rem;
@@ -143,20 +176,12 @@
         color: var(--text-secondary, #334155);
         border: 2px solid transparent;
       }
-      .dup-algorithm-selector label:hover {
-        background: var(--bg-hover, #f1f5f9);
-      }
-      .dup-algorithm-selector input[type="radio"] {
-        width: 16px;
-        height: 16px;
-        cursor: pointer;
-        accent-color: var(--primary, #4f46e5);
-      }
       .dup-algorithm-selector label.active {
         border-color: var(--primary, #4f46e5);
         background: rgba(79, 70, 229, 0.08);
         color: var(--primary, #4f46e5);
       }
+
       .database-tables-container {
         display: flex;
         flex-direction: column;
@@ -164,13 +189,6 @@
         max-height: 400px;
         overflow-y: auto;
         padding-right: 4px;
-      }
-      .database-tables-container::-webkit-scrollbar {
-        width: 4px;
-      }
-      .database-tables-container::-webkit-scrollbar-thumb {
-        background: var(--primary-light, #818cf8);
-        border-radius: 10px;
       }
       #db-selection-container {
         position: sticky;
@@ -186,70 +204,12 @@
         overflow-y: auto;
         padding-right: 4px;
       }
-      .topbar {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 0.75rem 2rem;
-        background: var(--bg-container);
-        border-bottom: 1px solid var(--border-color);
-        gap: 1rem;
-        flex-shrink: 0;
-        backdrop-filter: blur(10px);
-        position: sticky;
-        top: 0;
-        z-index: 100;
-        width: 100%;
-        box-sizing: border-box;
-      }
-      .topbar-right {
-        display: flex;
-        align-items: center;
-        gap: 0.75rem;
-        margin-left: auto;
-      }
-      .topbar-center {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-      }
-      @media (max-width: 768px) {
-        .dashboard-content {
-          padding: 1rem !important;
-        }
-        .dup-algorithm-selector {
-          flex-direction: column;
-          align-items: stretch;
-        }
-        .dup-algorithm-selector label {
-          justify-content: center;
-        }
-        .dup-algorithm-selector .button {
-          margin-left: 0 !important;
-        }
-        .topbar {
-          padding: 0.5rem 1rem;
-          flex-wrap: wrap;
-        }
-        .topbar-brand .brand-name {
-          display: none;
-        }
-        .topbar-center {
-          order: 3;
-          width: 100%;
-          justify-content: center;
-          margin-top: 0.3rem;
-        }
-      }
+
       .chart-container {
         background: var(--bg-secondary, #f8fafc);
         padding: 1rem;
         border-radius: 8px;
         border: 1px solid var(--border-color, #e2e8f0);
-      }
-      .chart-container h4 {
-        margin: 0 0 12px 0;
-        color: var(--text-color, #111);
       }
       .chart-bar-container {
         max-height: 400px;
@@ -290,6 +250,7 @@
         font-weight: 600;
         font-size: 0.85rem;
       }
+
       .stat-card {
         background: var(--bg-secondary, #f8fafc);
         padding: 1rem;
@@ -312,6 +273,7 @@
       .stat-grid .value {
         font-weight: 600;
       }
+
       .edit-modal-overlay {
         position: fixed;
         top: 0;
@@ -386,6 +348,7 @@
         background: #6c757d;
         color: white;
       }
+
       .btn-edit-row {
         background: #f39c12;
         color: white;
@@ -403,6 +366,7 @@
       .btn-edit-row:hover {
         background: #e67e22;
       }
+
       .table-filter-container {
         display: flex;
         gap: 10px;
@@ -419,15 +383,7 @@
         color: var(--text-color, #334155);
         font-size: 0.9rem;
       }
-      .table-filter-container select {
-        padding: 0.5rem 1rem;
-        border-radius: 6px;
-        border: 1px solid var(--border-color, #cbd5e1);
-        background: var(--bg-card, #ffffff);
-        color: var(--text-color, #1a1a2e);
-        font-size: 0.9rem;
-        min-width: 200px;
-      }
+
       .progress-bar-container {
         position: fixed;
         top: 0;
@@ -444,8 +400,9 @@
         transition: width 0.3s ease;
       }
       #duplicates-view .dashboard-content {
-        padding: 1.5rem 2rem !important;
+        padding: 1.5rem 2rem 80px 2rem !important;
       }
+
       .btn-terminate {
         background: #e67e22;
         color: white;
@@ -455,6 +412,7 @@
       .btn-terminate:hover {
         background: #d35400;
       }
+
       .btn-add-row {
         background: #27ae60;
         color: white;
@@ -466,9 +424,6 @@
         display: inline-flex;
         align-items: center;
         gap: 6px;
-      }
-      .btn-add-row:hover {
-        background: #1e8449;
       }
       .btn-show-results {
         background: #17a2b8;
@@ -482,33 +437,7 @@
         align-items: center;
         gap: 6px;
       }
-      .btn-show-results:hover {
-        background: #138496;
-      }
-      .search-right-container {
-        display: flex;
-        gap: 10px;
-        justify-content: flex-end;
-        margin-bottom: 1rem;
-        flex-wrap: wrap;
-      }
-      .search-right-container .search-input {
-        flex: 1;
-        max-width: 400px;
-        padding: 10px;
-        border-radius: 4px;
-        border: 1px solid var(--border-color);
-        background: var(--bg-input);
-      }
-      .btn-create-db {
-        background: #8e44ad;
-        color: white;
-        border: none;
-        font-weight: 600;
-      }
-      .btn-create-db:hover {
-        background: #71368a;
-      }
+
       .create-db-panel {
         background: var(--bg-card);
         padding: 2rem;
@@ -536,15 +465,6 @@
         font-size: 0.95rem;
         box-sizing: border-box;
       }
-      .create-db-panel select {
-        width: 100%;
-        padding: 0.7rem;
-        border: 1px solid var(--border-color);
-        border-radius: 6px;
-        background: var(--bg-input);
-        color: var(--text-color);
-        font-size: 0.95rem;
-      }
       .create-db-actions {
         display: flex;
         gap: 10px;
@@ -566,38 +486,24 @@
         background: #8e44ad;
         color: white;
       }
-      .btn-primary-purple:hover {
-        background: #71368a;
-      }
       .btn-green {
         background: #27ae60;
         color: white;
-      }
-      .btn-green:hover {
-        background: #1e8449;
       }
       .btn-blue {
         background: #4f46e5;
         color: white;
       }
-      .btn-blue:hover {
-        background: #4338ca;
-      }
       .btn-grey {
         background: #6c757d;
         color: white;
       }
-      .btn-grey:hover {
-        background: #5a6268;
-      }
+
       .btn-master-list {
         background: #e67e22;
         color: white;
         border: none;
         font-weight: 600;
-      }
-      .btn-master-list:hover {
-        background: #d35400;
       }
       .btn-stats-query {
         background: #4f46e5;
@@ -605,12 +511,7 @@
         border: none;
         font-weight: 600;
       }
-      .btn-stats-query:hover {
-        background: #4338ca;
-      }
-      .stat-query-btn:hover {
-        background: #e0e7ff !important;
-      }
+
       .btn-delete-db {
         background: #dc3545;
         color: white;
@@ -623,9 +524,6 @@
         align-items: center;
         gap: 6px;
         transition: all 0.2s;
-      }
-      .btn-delete-db:hover {
-        background: #c82333;
       }
       .btn-delete-table {
         background: #dc3545;
@@ -641,11 +539,7 @@
         gap: 4px;
         transition: all 0.2s;
       }
-      .btn-delete-table:hover {
-        background: #c82333;
-      }
 
-      /* Bouton precedent generique */
       .btn-back-global {
         background: #6c757d;
         color: white;
@@ -663,7 +557,6 @@
         background: #5a6268;
       }
 
-      /* Checkboxes tables doublons */
       .dup-table-checkbox-label {
         display: inline-flex;
         align-items: center;
@@ -679,10 +572,6 @@
         transition: all 0.2s;
         user-select: none;
       }
-      .dup-table-checkbox-label:hover {
-        border-color: var(--primary, #4f46e5);
-        background: #eef2ff;
-      }
       .dup-table-checkbox-label.checked {
         border-color: var(--primary, #4f46e5);
         background: #e0e7ff;
@@ -696,13 +585,61 @@
         accent-color: var(--primary, #4f46e5);
       }
 
-      /* Bouton TOUT SUPPRIMER */
       .btn-delete-all-dups {
         background: #8b0000 !important;
         font-weight: 700 !important;
       }
       .btn-delete-all-dups:hover {
         background: #a52a2a !important;
+      }
+
+      /* ✅ FOOTER */
+      #app-footer {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        padding: 8px 16px;
+        background: var(--bg-container, #fff);
+        border-top: 1px solid var(--border-color, #e2e8f0);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 12px;
+        font-size: 0.8rem;
+        color: var(--text-muted, #64748b);
+        z-index: 500;
+        box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.04);
+      }
+      #app-footer button {
+        background: none;
+        border: none;
+        color: var(--primary, #4f46e5);
+        cursor: pointer;
+        font-size: 0.8rem;
+        font-weight: 600;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 8px;
+        border-radius: 4px;
+        transition: background 0.2s;
+      }
+      #app-footer button:hover {
+        background: rgba(79, 70, 229, 0.08);
+      }
+
+      @media (max-width: 768px) {
+        .dashboard-content {
+          padding: 1rem 1rem 80px 1rem !important;
+        }
+        .topbar {
+          padding: 0.5rem 1rem;
+          flex-wrap: wrap;
+        }
+        .topbar-brand .brand-name {
+          display: none;
+        }
       }
     </style>
   </head>
@@ -725,7 +662,7 @@
         aria-labelledby="setup-title"
       >
         <div class="brand-header-row">
-          <div class="brand-mark">DM</div>
+          <div class="brand-mark">XL</div>
           <button
             id="theme-toggle-setup"
             class="secondary-button theme-toggle-btn theme-global-btn"
@@ -767,7 +704,7 @@
         aria-labelledby="login-title"
       >
         <div class="brand-header-row">
-          <div class="brand-mark">DM</div>
+          <div class="brand-mark">XL</div>
           <button
             id="theme-toggle-login"
             class="secondary-button theme-toggle-btn theme-global-btn"
@@ -810,13 +747,13 @@
       >
         <header class="topbar">
           <div class="topbar-brand">
-            <div class="brand-mark small">DM</div>
+            <div class="brand-mark small">XL</div>
             <div>
-              <span class="brand-name">Data Manager</span>
+              <span class="brand-name">xl2db</span>
               <span class="brand-subtitle">Gestion de donnees</span>
             </div>
           </div>
-          <div class="topbar-right">
+          <div class="topbar-left-actions">
             <button
               class="secondary-button btn-home"
               type="button"
@@ -824,6 +761,8 @@
             >
               <i class="fas fa-home"></i> Accueil
             </button>
+          </div>
+          <div class="topbar-right">
             <div class="menu-container">
               <button
                 id="menu-button"
@@ -850,6 +789,16 @@
                 <button class="menu-item theme-global-btn" type="button">
                   <i class="fas fa-adjust"></i> Changer de theme
                 </button>
+                <button class="menu-item about-global-btn" type="button">
+                  <i class="fas fa-info-circle"></i> A propos
+                </button>
+                <button class="menu-item updates-global-btn" type="button">
+                  <i class="fas fa-sync-alt"></i> Verifier les mises a jour
+                </button>
+                <button class="menu-item contact-global-btn" type="button">
+                  <i class="fas fa-envelope"></i> Nous contacter
+                </button>
+                <div class="menu-separator"></div>
                 <button
                   id="quit-app-button"
                   class="menu-item danger-item quit-global-btn"
@@ -969,20 +918,13 @@
       >
         <header class="topbar">
           <div class="topbar-brand">
-            <div class="brand-mark small">DM</div>
+            <div class="brand-mark small">XL</div>
             <div>
-              <span class="brand-name">Data Manager</span>
+              <span class="brand-name">xl2db</span>
               <span class="brand-subtitle">Creation de base</span>
             </div>
           </div>
-          <div class="topbar-right">
-            <button
-              class="secondary-button btn-back-global"
-              type="button"
-              title="Retour a la page precedente"
-            >
-              <i class="fas fa-arrow-left"></i> Precedent
-            </button>
+          <div class="topbar-left-actions">
             <button
               class="secondary-button btn-home"
               type="button"
@@ -991,12 +933,14 @@
               <i class="fas fa-home"></i> Accueil
             </button>
             <button
-              id="btn-create-db-back"
-              class="secondary-button"
+              class="secondary-button btn-back-global"
               type="button"
+              title="Retour a la page precedente"
             >
-              <i class="fas fa-arrow-left"></i> Retour
+              <i class="fas fa-arrow-left"></i> Precedent
             </button>
+          </div>
+          <div class="topbar-right">
             <div class="menu-container">
               <button
                 id="menu-button-create"
@@ -1023,6 +967,16 @@
                 <button class="menu-item theme-global-btn" type="button">
                   <i class="fas fa-adjust"></i> Changer de theme
                 </button>
+                <button class="menu-item about-global-btn" type="button">
+                  <i class="fas fa-info-circle"></i> A propos
+                </button>
+                <button class="menu-item updates-global-btn" type="button">
+                  <i class="fas fa-sync-alt"></i> Verifier les mises a jour
+                </button>
+                <button class="menu-item contact-global-btn" type="button">
+                  <i class="fas fa-envelope"></i> Nous contacter
+                </button>
+                <div class="menu-separator"></div>
                 <button
                   id="quit-app-button-create"
                   class="menu-item danger-item quit-global-btn"
@@ -1049,20 +1003,20 @@
 
           <div class="create-db-panel">
             <div class="form-group">
-              <label for="create-db-name">
-                <i class="fas fa-database"></i> Nom de la base (sans .db)
-              </label>
+              <label for="create-db-name"
+                ><i class="fas fa-database"></i> Nom de la base (sans
+                .db)</label
+              >
               <input
                 type="text"
                 id="create-db-name"
                 placeholder="Ex: ma_nouvelle_base"
               />
             </div>
-
             <div class="form-group">
-              <label for="create-db-table-name">
-                <i class="fas fa-table"></i> Nom de la table principale
-              </label>
+              <label for="create-db-table-name"
+                ><i class="fas fa-table"></i> Nom de la table principale</label
+              >
               <input
                 type="text"
                 id="create-db-table-name"
@@ -1070,12 +1024,11 @@
                 value="donnees"
               />
             </div>
-
             <div class="form-group">
-              <label>
-                <i class="fas fa-file-excel"></i> Importer depuis un fichier
-                Excel (optionnel)
-              </label>
+              <label
+                ><i class="fas fa-file-excel"></i> Importer depuis un fichier
+                Excel (optionnel)</label
+              >
               <div
                 style="
                   display: flex;
@@ -1103,22 +1056,19 @@
                 >
               </div>
             </div>
-
             <div id="create-db-sheet-container" class="form-group hidden">
-              <label for="create-db-sheet-select">
-                <i class="fas fa-file-alt"></i> Feuille Excel a importer
-              </label>
+              <label for="create-db-sheet-select"
+                ><i class="fas fa-file-alt"></i> Feuille Excel a importer</label
+              >
               <select id="create-db-sheet-select">
                 <option value="">-- Toutes les feuilles --</option>
               </select>
             </div>
-
             <div
               id="create-db-message"
               class="status-message"
               role="status"
             ></div>
-
             <div class="create-db-actions">
               <button
                 id="btn-create-from-excel"
@@ -1131,7 +1081,6 @@
                 <i class="fas fa-plus"></i> Creer une base vide
               </button>
             </div>
-
             <div
               id="create-db-export-section"
               class="hidden"
@@ -1142,8 +1091,8 @@
               "
             >
               <h3 style="margin-bottom: 1rem; color: var(--text-color)">
-                <i class="fas fa-check-circle" style="color: #27ae60"></i>
-                Base creee avec succes
+                <i class="fas fa-check-circle" style="color: #27ae60"></i> Base
+                creee avec succes
               </h3>
               <p style="color: var(--text-muted); margin-bottom: 1rem">
                 Vous pouvez maintenant exporter cette base au format Excel.
@@ -1170,20 +1119,13 @@
       >
         <header class="topbar">
           <div class="topbar-brand">
-            <div class="brand-mark small">DM</div>
+            <div class="brand-mark small">XL</div>
             <div>
-              <span class="brand-name">Data Manager</span>
+              <span class="brand-name">xl2db</span>
               <span class="brand-subtitle">Import Excel</span>
             </div>
           </div>
-          <div class="topbar-right">
-            <button
-              class="secondary-button btn-back-global"
-              type="button"
-              title="Retour a la page precedente"
-            >
-              <i class="fas fa-arrow-left"></i> Precedent
-            </button>
+          <div class="topbar-left-actions">
             <button
               class="secondary-button btn-home"
               type="button"
@@ -1191,13 +1133,11 @@
             >
               <i class="fas fa-home"></i> Accueil
             </button>
-            <button
-              id="back-to-dashboard-button"
-              class="secondary-button"
-              type="button"
-            >
-              Retour
+            <button class="secondary-button btn-back-global" type="button">
+              <i class="fas fa-arrow-left"></i> Precedent
             </button>
+          </div>
+          <div class="topbar-right">
             <div class="menu-container">
               <button
                 id="menu-button-import"
@@ -1224,6 +1164,16 @@
                 <button class="menu-item theme-global-btn" type="button">
                   <i class="fas fa-adjust"></i> Changer de theme
                 </button>
+                <button class="menu-item about-global-btn" type="button">
+                  <i class="fas fa-info-circle"></i> A propos
+                </button>
+                <button class="menu-item updates-global-btn" type="button">
+                  <i class="fas fa-sync-alt"></i> Verifier les mises a jour
+                </button>
+                <button class="menu-item contact-global-btn" type="button">
+                  <i class="fas fa-envelope"></i> Nous contacter
+                </button>
+                <div class="menu-separator"></div>
                 <button
                   id="quit-app-button-import"
                   class="menu-item danger-item quit-global-btn"
@@ -1257,20 +1207,17 @@
                 >Aucun fichier selectionne</span
               >
             </div>
-
             <div
               id="excel-import-message"
               class="status-message"
               role="status"
             ></div>
-
             <label for="excel-table-name">Nom de la table dans la base</label>
             <input
               id="excel-table-name"
               type="text"
               placeholder="ex: clients_2024"
             />
-
             <button
               id="import-excel-into-database-button"
               class="button button-primary"
@@ -1278,14 +1225,12 @@
             >
               <i class="fas fa-database"></i> Convertir en base de donnees
             </button>
-
             <div id="excel-sheet-container" class="form-group hidden">
               <label for="excel-sheet-select">Feuille Excel</label>
               <select id="excel-sheet-select">
                 <option value="">Selectionnez une feuille</option>
               </select>
             </div>
-
             <div
               id="excel-preview-container"
               class="excel-preview-container hidden"
@@ -1317,20 +1262,13 @@
       >
         <header class="topbar">
           <div class="topbar-brand">
-            <div class="brand-mark small">DM</div>
+            <div class="brand-mark small">XL</div>
             <div>
-              <span class="brand-name">Data Manager</span>
+              <span class="brand-name">xl2db</span>
               <span class="brand-subtitle">Bases de donnees</span>
             </div>
           </div>
-          <div class="topbar-right">
-            <button
-              class="secondary-button btn-back-global"
-              type="button"
-              title="Retour a la page precedente"
-            >
-              <i class="fas fa-arrow-left"></i> Precedent
-            </button>
+          <div class="topbar-left-actions">
             <button
               class="secondary-button btn-home"
               type="button"
@@ -1338,6 +1276,11 @@
             >
               <i class="fas fa-home"></i> Accueil
             </button>
+            <button class="secondary-button btn-back-global" type="button">
+              <i class="fas fa-arrow-left"></i> Precedent
+            </button>
+          </div>
+          <div class="topbar-right">
             <button
               id="btn-terminate-database-existing"
               class="secondary-button btn-terminate"
@@ -1372,6 +1315,16 @@
                 <button class="menu-item theme-global-btn" type="button">
                   <i class="fas fa-adjust"></i> Changer de theme
                 </button>
+                <button class="menu-item about-global-btn" type="button">
+                  <i class="fas fa-info-circle"></i> A propos
+                </button>
+                <button class="menu-item updates-global-btn" type="button">
+                  <i class="fas fa-sync-alt"></i> Verifier les mises a jour
+                </button>
+                <button class="menu-item contact-global-btn" type="button">
+                  <i class="fas fa-envelope"></i> Nous contacter
+                </button>
+                <div class="menu-separator"></div>
                 <button
                   id="quit-app-button-existing"
                   class="menu-item danger-item quit-global-btn"
@@ -1442,7 +1395,6 @@
                   id="btn-delete-selected-db"
                   class="btn-delete-db"
                   type="button"
-                  title="Supprimer la base selectionnee"
                 >
                   <i class="fas fa-trash-alt"></i> Supprimer la base
                 </button>
@@ -1500,7 +1452,6 @@
                 <h2>Outils de gestion</h2>
               </div>
             </div>
-
             <div
               class="feature-grid"
               style="
@@ -1619,20 +1570,13 @@
       >
         <header class="topbar">
           <div class="topbar-brand">
-            <div class="brand-mark small">DM</div>
+            <div class="brand-mark small">XL</div>
             <div>
-              <span class="brand-name">Data Manager</span>
+              <span class="brand-name">xl2db</span>
               <span class="brand-subtitle">Recherche de doublons</span>
             </div>
           </div>
-          <div class="topbar-right">
-            <button
-              class="secondary-button btn-back-global"
-              type="button"
-              title="Retour a la page precedente"
-            >
-              <i class="fas fa-arrow-left"></i> Precedent
-            </button>
+          <div class="topbar-left-actions">
             <button
               class="secondary-button btn-home"
               type="button"
@@ -1640,6 +1584,11 @@
             >
               <i class="fas fa-home"></i> Accueil
             </button>
+            <button class="secondary-button btn-back-global" type="button">
+              <i class="fas fa-arrow-left"></i> Precedent
+            </button>
+          </div>
+          <div class="topbar-right">
             <button
               id="btn-terminate-database-duplicates"
               class="secondary-button btn-terminate"
@@ -1674,6 +1623,16 @@
                 <button class="menu-item theme-global-btn" type="button">
                   <i class="fas fa-adjust"></i> Changer de theme
                 </button>
+                <button class="menu-item about-global-btn" type="button">
+                  <i class="fas fa-info-circle"></i> A propos
+                </button>
+                <button class="menu-item updates-global-btn" type="button">
+                  <i class="fas fa-sync-alt"></i> Verifier les mises a jour
+                </button>
+                <button class="menu-item contact-global-btn" type="button">
+                  <i class="fas fa-envelope"></i> Nous contacter
+                </button>
+                <div class="menu-separator"></div>
                 <button
                   id="quit-app-button-duplicates"
                   class="menu-item danger-item quit-global-btn"
@@ -1725,9 +1684,9 @@
                   gap: 10px;
                 "
               >
-                <label style="font-weight: 600">
-                  <i class="fas fa-table"></i> Tables a analyser :
-                </label>
+                <label style="font-weight: 600"
+                  ><i class="fas fa-table"></i> Tables a analyser :</label
+                >
                 <div style="display: flex; gap: 8px; flex-wrap: wrap">
                   <button
                     id="btn-check-all-tables"
@@ -1983,7 +1942,7 @@
                     cursor: pointer;
                     font-weight: 700;
                   "
-                  title="Supprime TOUS les doublons trouves (pas seulement ceux affiches)"
+                  title="Supprime TOUS les doublons trouves"
                 >
                   <i class="fas fa-bomb"></i> TOUT SUPPRIMER
                 </button>
@@ -2023,20 +1982,13 @@
       >
         <header class="topbar">
           <div class="topbar-brand">
-            <div class="brand-mark small">DM</div>
+            <div class="brand-mark small">XL</div>
             <div>
-              <span class="brand-name">Data Manager</span>
+              <span class="brand-name">xl2db</span>
               <span class="brand-subtitle">Manipulation</span>
             </div>
           </div>
-          <div class="topbar-right">
-            <button
-              class="secondary-button btn-back-global"
-              type="button"
-              title="Retour a la page precedente"
-            >
-              <i class="fas fa-arrow-left"></i> Precedent
-            </button>
+          <div class="topbar-left-actions">
             <button
               class="secondary-button btn-home"
               type="button"
@@ -2044,13 +1996,11 @@
             >
               <i class="fas fa-home"></i> Accueil
             </button>
-            <button
-              class="secondary-button"
-              type="button"
-              onclick="goToExistingDb()"
-            >
-              Retour
+            <button class="secondary-button btn-back-global" type="button">
+              <i class="fas fa-arrow-left"></i> Precedent
             </button>
+          </div>
+          <div class="topbar-right">
             <button
               id="btn-terminate-database-manipulate"
               class="secondary-button btn-terminate"
@@ -2085,6 +2035,16 @@
                 <button class="menu-item theme-global-btn" type="button">
                   <i class="fas fa-adjust"></i> Changer de theme
                 </button>
+                <button class="menu-item about-global-btn" type="button">
+                  <i class="fas fa-info-circle"></i> A propos
+                </button>
+                <button class="menu-item updates-global-btn" type="button">
+                  <i class="fas fa-sync-alt"></i> Verifier les mises a jour
+                </button>
+                <button class="menu-item contact-global-btn" type="button">
+                  <i class="fas fa-envelope"></i> Nous contacter
+                </button>
+                <div class="menu-separator"></div>
                 <button
                   id="quit-app-button-manipulate"
                   class="menu-item danger-item quit-global-btn"
@@ -2147,9 +2107,8 @@
                       display: block;
                       margin-bottom: 0.5rem;
                     "
+                    >Selectionner la table :</label
                   >
-                    Selectionner la table :
-                  </label>
                   <select
                     id="manipulate-table-select"
                     style="
@@ -2862,6 +2821,21 @@
         </div>
       </section>
     </main>
+
+    <!-- ✅ FOOTER avec boutons Mises a jour et Contact -->
+    <footer id="app-footer">
+      <span
+        ><strong>xl2db</strong> v<span id="footer-version">1.0.0</span></span
+      >
+      <span style="color: var(--border-color, #cbd5e1)">•</span>
+      <button id="footer-check-updates" type="button">
+        <i class="fas fa-sync-alt"></i> Mises a jour
+      </button>
+      <span style="color: var(--border-color, #cbd5e1)">•</span>
+      <button id="footer-contact" type="button">
+        <i class="fas fa-envelope"></i> Nous contacter
+      </button>
+    </footer>
 
     <div
       id="notification-container"
