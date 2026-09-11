@@ -20,7 +20,7 @@ def _get_data_dir() -> Path:
             base = Path(os.environ.get("APPDATA", os.path.expanduser("~")))
         else:
             base = Path(os.path.expanduser("~/.local/share"))
-        app_dir = base / "DataManager"
+        app_dir = base / "xl2db"
     else:
         # Mode DEV : dossier du projet
         app_dir = Path(__file__).resolve().parent.parent
