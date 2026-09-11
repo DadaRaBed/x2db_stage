@@ -1,45 +1,5 @@
 [
   {
-    "text": "Exécution de SELECT_ALL sur pms_25",
-    "date": "2026-09-09 15:29:27",
-    "user": "nabory"
-  },
-  {
-    "text": "Exécution de WHERE_LIKE sur pms_25",
-    "date": "2026-09-09 15:30:03",
-    "user": "nabory"
-  },
-  {
-    "text": "Exécution de WHERE_LIKE sur pms_25",
-    "date": "2026-09-09 15:38:07",
-    "user": "nabory"
-  },
-  {
-    "text": "Exécution de WHERE_LIKE sur pms_25",
-    "date": "2026-09-09 15:38:19",
-    "user": "nabory"
-  },
-  {
-    "text": "Exécution de WHERE_LIKE sur pms_25",
-    "date": "2026-09-09 15:39:03",
-    "user": "nabory"
-  },
-  {
-    "text": "Exécution de WHERE_LIKE sur pms_25",
-    "date": "2026-09-09 15:39:24",
-    "user": "nabory"
-  },
-  {
-    "text": "Exécution de MIN sur pms_25",
-    "date": "2026-09-09 15:40:38",
-    "user": "nabory"
-  },
-  {
-    "text": "Exécution de SELECT_ALL sur pms_25",
-    "date": "2026-09-09 15:41:20",
-    "user": "nabory"
-  },
-  {
     "text": "Exécution de SUM sur pms_25",
     "date": "2026-09-09 15:41:55",
     "user": "nabory"
@@ -497,6 +457,46 @@
   {
     "text": "Envoi d'un message de contact",
     "date": "2026-09-11 14:49:50",
+    "user": "nabory"
+  },
+  {
+    "text": "Ouverture de la base : maj_bdd_eaf_juin_2026_ttmr_ihb.db",
+    "date": "2026-09-11 15:29:06",
+    "user": "nabory"
+  },
+  {
+    "text": "Suppression de la table : listes_meres",
+    "date": "2026-09-11 15:29:23",
+    "user": "nabory"
+  },
+  {
+    "text": "Suppression MASSIVE de 64 doublons en 0.43s",
+    "date": "2026-09-11 15:32:40",
+    "user": "nabory"
+  },
+  {
+    "text": "Modification de la ligne #1 dans appui_eaf_2026",
+    "date": "2026-09-11 15:35:59",
+    "user": "nabory"
+  },
+  {
+    "text": "Terminer la base : maj_bdd_eaf_juin_2026_ttmr_ihb.db",
+    "date": "2026-09-11 15:38:02",
+    "user": "nabory"
+  },
+  {
+    "text": "Ouverture de la base : hello.db",
+    "date": "2026-09-11 15:56:42",
+    "user": "nabory"
+  },
+  {
+    "text": "Ouverture de la base : hello.db",
+    "date": "2026-09-11 16:26:04",
+    "user": "nabory"
+  },
+  {
+    "text": "Nettoyage de la base",
+    "date": "2026-09-11 16:26:08",
     "user": "nabory"
   }
 ]

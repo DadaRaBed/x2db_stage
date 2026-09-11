@@ -57,7 +57,6 @@ def get_resource_path(relative_path: str) -> Path:
 
 
 def get_icon_path() -> Optional[str]:
-    """Retourne le chemin vers l'icone selon le mode (dev/exe)."""
     if getattr(sys, "frozen", False):
         base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
     else:
@@ -357,6 +356,96 @@ class Api:
                 "message": f"Impossible de verifier les mises a jour : {e}",
             }
 
+    # ✅ NOUVELLE METHODE : telechargement et installation de la mise a jour
+    def download_and_install_update(self, download_url: str):
+        """
+        Telecharge la nouvelle version et lance un script batch pour
+        remplacer automatiquement l'executable actuel (Solution 2).
+        """
+        try:
+            import urllib.request
+            import tempfile
+            import subprocess
+            import shutil
+
+            if not getattr(sys, "frozen", False):
+                return {
+                    "success": False,
+                    "message": "La mise a jour auto n'est disponible qu'en mode .exe",
+                }
+
+            current_exe = sys.executable
+            temp_dir = Path(tempfile.gettempdir())
+            new_exe = temp_dir / "xl2db_new.exe"
+
+            # 1. Telecharger le nouveau .exe
+            try:
+                req = urllib.request.Request(
+                    download_url,
+                    headers={"User-Agent": f"{APP_NAME}/{APP_VERSION}"},
+                )
+                with urllib.request.urlopen(req, timeout=120) as response:
+                    with open(new_exe, "wb") as f:
+                        shutil.copyfileobj(response, f)
+            except Exception as e:
+                return {
+                    "success": False,
+                    "message": f"Echec du telechargement : {e}",
+                }
+
+            # 2. Verifier que le fichier a bien ete telecharge
+            if not new_exe.exists() or new_exe.stat().st_size < 1_000_000:
+                return {
+                    "success": False,
+                    "message": "Le fichier telecharge est invalide (trop petit ou inexistant).",
+                }
+
+            # 3. Creer un script batch qui va :
+            #    - attendre la fermeture de l'app
+            #    - remplacer l'ancien .exe par le nouveau
+            #    - relancer la nouvelle version
+            #    - se supprimer lui-meme
+            bat_file = temp_dir / "xl2db_update.bat"
+            bat_content = f"""@echo off
+chcp 65001 > nul
+timeout /t 3 /nobreak > nul
+:retry
+move /y "{new_exe}" "{current_exe}" 2>nul
+if errorlevel 1 (
+    timeout /t 1 /nobreak > nul
+    goto retry
+)
+start "" "{current_exe}"
+del "%~f0"
+"""
+            with open(bat_file, "w", encoding="utf-8") as f:
+                f.write(bat_content)
+
+            # 4. Lancer le .bat en mode invisible
+            try:
+                subprocess.Popen(
+                    ["cmd.exe", "/c", str(bat_file)],
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                    shell=False,
+                )
+            except Exception as e:
+                return {
+                    "success": False,
+                    "message": f"Impossible de lancer le script de mise a jour : {e}",
+                }
+
+            # 5. Fermer l'app pour liberer le .exe
+            time.sleep(0.5)
+            os._exit(0)
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return {
+                "success": False,
+                "message": f"Erreur lors de la mise a jour : {e}",
+            }
+
     def open_url_in_browser(self, url: str):
         try:
             import webbrowser
@@ -614,6 +703,7 @@ class Api:
             if max_col == 0:
                 return
 
+            # ✅ AutoFilter sur toutes les colonnes
             worksheet.auto_filter.ref = f"A1:{get_column_letter(max_col)}{max_row}"
 
             header_font = Font(bold=True, color="FFFFFF", size=11)
@@ -811,12 +901,27 @@ class Api:
             return {"success": False, "message": f"Erreur lors de la creation : {e}"}
 
     # ============================================================
-    # EXPORT EXCEL
+    # EXPORT EXCEL - ✅ CORRIGE (une table = une feuille + autofilter)
     # ============================================================
     def export_database_to_excel_from_path(self, db_path: str, output_excel_path: str):
+        """
+        Export professionnel d'une base SQLite vers Excel.
+        - Chaque table devient une feuille
+        - Les attributs deviennent les en-tetes
+        - Les valeurs deviennent les lignes
+        - AutoFilter + mise en forme professionnelle
+        """
         try:
             if not db_path or not os.path.exists(db_path):
                 return {"success": False, "message": "Base de donnees introuvable."}
+
+            if not output_excel_path or not str(output_excel_path).strip():
+                return {"success": False, "message": "Le chemin de sortie est requis."}
+
+            # S'assurer que le dossier de sortie existe
+            output_dir = os.path.dirname(output_excel_path)
+            if output_dir and not os.path.exists(output_dir):
+                os.makedirs(output_dir, exist_ok=True)
 
             conn = self._connect_db(db_path)
             try:
@@ -831,75 +936,66 @@ class Api:
                 if not tables:
                     return {"success": False, "message": "Aucune table dans cette base."}
 
+                # Trier : listes_meres en dernier
                 tables_ordered = [t for t in tables if t != "listes_meres"]
                 if "listes_meres" in tables:
                     tables_ordered.append("listes_meres")
 
+                tables_exported = []
+                total_rows_exported = 0
+
                 with pd.ExcelWriter(output_excel_path, engine="openpyxl") as writer:
                     for table in tables_ordered:
+                        # Lire la table
                         df = pd.read_sql_query(f'SELECT * FROM "{table}"', conn)
 
+                        # Supprimer la colonne id (inutile)
                         if "id" in df.columns:
                             df = df.drop(columns=["id"])
 
+                        # Convertir les dates
                         for col in df.columns:
                             if pd.api.types.is_datetime64_any_dtype(df[col]):
                                 df[col] = df[col].dt.date
 
-                        sheet_name = table[:31] if len(table) <= 31 else table[:31]
+                        # Nom de feuille : max 31 caracteres (limite Excel)
+                        sheet_name = table[:31] if len(table) > 31 else table
+
+                        # Ecrire dans Excel
                         df.to_excel(writer, sheet_name=sheet_name, index=False)
+
+                        # Appliquer le formatage professionnel (avec AutoFilter)
                         self._apply_professional_formatting(writer, sheet_name, df)
+
+                        tables_exported.append(sheet_name)
+                        total_rows_exported += len(df)
+
+                return {
+                    "success": True,
+                    "message": (
+                        f"Exportation reussie : {len(tables_exported)} feuille(s) "
+                        f"({total_rows_exported} lignes au total) vers {output_excel_path}"
+                    ),
+                    "tables_exported": tables_exported,
+                    "total_rows": total_rows_exported,
+                    "output_path": output_excel_path,
+                }
             finally:
                 self._safe_close_connection(conn)
 
-            return {
-                "success": True,
-                "message": f"Exportation professionnelle reussie vers {output_excel_path}",
-            }
         except Exception as e:
-            return {"success": False, "message": str(e)}
+            import traceback
+            traceback.print_exc()
+            return {"success": False, "message": f"Erreur lors de l'export Excel : {e}"}
 
     def export_database_to_excel(self, output_excel_path: str, file_path: str = None):
+        """Export professionnel de la base active."""
         try:
             db_path = self._get_db_path(file_path)
             if not db_path:
                 return {"success": False, "message": "Aucune base active."}
 
-            conn = self._connect_db(db_path)
-            try:
-                cursor = conn.cursor()
-                cursor.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';"
-                )
-                tables = [
-                    row[0] for row in cursor.fetchall() if row[0] != "sqlite_sequence"
-                ]
-
-                tables_ordered = [t for t in tables if t != "listes_meres"]
-                if "listes_meres" in tables:
-                    tables_ordered.append("listes_meres")
-
-                with pd.ExcelWriter(output_excel_path, engine="openpyxl") as writer:
-                    for table in tables_ordered:
-                        df = pd.read_sql_query(f'SELECT * FROM "{table}"', conn)
-
-                        if "id" in df.columns:
-                            df = df.drop(columns=["id"])
-
-                        for col in df.columns:
-                            if pd.api.types.is_datetime64_any_dtype(df[col]):
-                                df[col] = df[col].dt.date
-
-                        sheet_name = table[:31] if len(table) <= 31 else table[:31]
-                        df.to_excel(writer, sheet_name=sheet_name, index=False)
-                        self._apply_professional_formatting(writer, sheet_name, df)
-            finally:
-                self._safe_close_connection(conn)
-
-            return {
-                "success": True,
-                "message": f"Exportation reussie vers {output_excel_path}",
-            }
+            return self.export_database_to_excel_from_path(db_path, output_excel_path)
         except Exception as e:
             return {"success": False, "message": str(e)}
 
@@ -1986,7 +2082,7 @@ class Api:
                 return {"success": False, "message": "Aucune base active.", "duplicates": []}
 
             conn = self._connect_db(db_path)
-            conn.row_factory = sqlite3.Row           
+            conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
 
             cursor.execute(f'PRAGMA table_info("{table_name}")')
@@ -2221,7 +2317,6 @@ class Api:
         finally:
             self._safe_close_connection(conn)
 
-    # ✅ Suppression en lot ultra-rapide
     def delete_duplicates_batch(self, duplicates: List[Dict[str, Any]], file_path: str = None):
         import time as _time
         start_time = _time.time()
@@ -2343,7 +2438,15 @@ class Api:
                 "errors": len(duplicates) if duplicates else 0,
             }
 
+    # ============================================================
+    # ✅ NETTOYAGE DES DONNEES - CORRIGE
+    # ============================================================
     def clean_database_values(self, file_path: str = None):
+        """
+        Nettoie les valeurs NaN/Null dans toutes les tables de la base active.
+        - Colonnes numeriques -> 0
+        - Colonnes texte -> "Non specifie"
+        """
         conn = None
         try:
             db_path = self._get_db_path(file_path)
@@ -2352,6 +2455,8 @@ class Api:
 
             conn = self._connect_db(db_path)
             cursor = conn.cursor()
+
+            # Recuperer toutes les tables
             cursor.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';"
             )
@@ -2359,20 +2464,50 @@ class Api:
                 row[0] for row in cursor.fetchall() if row[0] != "sqlite_sequence"
             ]
 
-            for table in tables:
-                df = pd.read_sql_query(f"SELECT * FROM [{table}]", conn)
-                if df.empty:
-                    continue
-                for col in df.columns:
-                    if pd.api.types.is_numeric_dtype(df[col]):
-                        df[col] = df[col].fillna(0)
-                    else:
-                        df[col] = df[col].fillna("Non specifie")
-                df.to_sql(table, conn, if_exists="replace", index=False)
+            if not tables:
+                return {"success": False, "message": "Aucune table dans cette base."}
 
-            return {"success": True, "message": "Nettoyage des valeurs NaN/Null termine."}
+            cleaned_tables = []
+            total_cells_cleaned = 0
+
+            for table in tables:
+                try:
+                    # Lire la table entiere
+                    df = pd.read_sql_query(f'SELECT * FROM "{table}"', conn)
+                    if df.empty:
+                        continue
+
+                    cells_cleaned_before = df.isna().sum().sum()
+
+                    for col in df.columns:
+                        if pd.api.types.is_numeric_dtype(df[col]):
+                            df[col] = df[col].fillna(0)
+                        else:
+                            df[col] = df[col].fillna("Non specifie")
+
+                    # Reecrire la table
+                    df.to_sql(table, conn, if_exists="replace", index=False)
+                    cleaned_tables.append(table)
+                    total_cells_cleaned += int(cells_cleaned_before)
+
+                except Exception as e:
+                    print(f"[WARN] Erreur nettoyage table '{table}' : {e}")
+                    continue
+
+            return {
+                "success": True,
+                "message": (
+                    f"Nettoyage termine : {len(cleaned_tables)} table(s) traitee(s), "
+                    f"{total_cells_cleaned} cellule(s) vide(s) remplacee(s)."
+                ),
+                "cleaned_tables": cleaned_tables,
+                "total_cells_cleaned": total_cells_cleaned,
+            }
+
         except Exception as e:
-            return {"success": False, "message": str(e)}
+            import traceback
+            traceback.print_exc()
+            return {"success": False, "message": f"Erreur lors du nettoyage : {e}"}
         finally:
             self._safe_close_connection(conn)
 
@@ -2835,19 +2970,17 @@ class Api:
 
 def main():
     global _APP_WINDOW
-
     initialize_database()
-
     api = Api()
-
+    
     _APP_WINDOW = webview.create_window(
-        "Data Manager - Expert Edition",
+        "Excel 2 database",
         str(INDEX_FILE),
         js_api=api,
         width=1280,
         height=800,
         resizable=True,
-        fullscreen=False,
+        fullscreen=False
     )
     webview.start()
 

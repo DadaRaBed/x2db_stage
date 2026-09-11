@@ -4201,7 +4201,7 @@ async function showAboutModal() {
   });
 }
 
-// --- Modale MISES A JOUR ---
+// --- Modale MISES A JOUR (avec auto-update) ---
 async function checkForUpdates() {
   const overlay = document.createElement("div");
   overlay.className = "edit-modal-overlay";
@@ -4267,7 +4267,7 @@ async function checkForUpdates() {
         }
         <div style="display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
           <button type="button" id="btn-download-update" style="padding: 0.6rem 1.5rem; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; background: #4f46e5; color: white;">
-            <i class="fas fa-download"></i> Telecharger
+            <i class="fas fa-download"></i> Telecharger et installer
           </button>
           <button type="button" id="btn-close-updates" style="padding: 0.6rem 1.5rem; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; background: #6c757d; color: white;">Plus tard</button>
         </div>
@@ -4275,8 +4275,41 @@ async function checkForUpdates() {
 
       const downloadBtn = content.querySelector("#btn-download-update");
       if (downloadBtn) {
-        downloadBtn.onclick = () => {
-          window.pywebview.api.open_url_in_browser(result.download_url);
+        downloadBtn.onclick = async () => {
+          if (
+            !confirm(
+              "Mise a jour automatique\\n\\n" +
+                "L'application va :\\n" +
+                "1. Telecharger la nouvelle version\\n" +
+                "2. Se fermer automatiquement\\n" +
+                "3. Se relancer avec la nouvelle version\\n\\n" +
+                "Continuer ?",
+            )
+          )
+            return;
+
+          downloadBtn.disabled = true;
+          downloadBtn.innerHTML =
+            '<i class="fas fa-spinner fa-spin"></i> Telechargement en cours...';
+
+          try {
+            const res = await window.pywebview.api.download_and_install_update(
+              result.download_url,
+            );
+
+            if (res && !res.success) {
+              alert("Erreur : " + res.message);
+              downloadBtn.disabled = false;
+              downloadBtn.innerHTML =
+                '<i class="fas fa-download"></i> Telecharger et installer';
+            }
+            // Si succes, l'app se ferme et se relance automatiquement
+          } catch (err) {
+            alert("Erreur : " + err.message);
+            downloadBtn.disabled = false;
+            downloadBtn.innerHTML =
+              '<i class="fas fa-download"></i> Telecharger et installer';
+          }
         };
       }
     }
@@ -4295,7 +4328,6 @@ async function checkForUpdates() {
     if (closeBtn) closeBtn.onclick = close;
   }
 }
-
 // --- Modale NOUS CONTACTER ---
 function showContactModal() {
   const overlay = document.createElement("div");
@@ -4404,6 +4436,90 @@ function showContactModal() {
 // INITIALISATION DES NOUVELLES FONCTIONNALITES
 // ============================================
 function initNewFeatures() {
+  // Dans initNewFeatures(), ajoutez :
+  const btnCleanDb = document.getElementById("btn-clean-db");
+  if (btnCleanDb) {
+    btnCleanDb.addEventListener("click", async () => {
+      if (!isDbOpen) {
+        showNotification("Veuillez d'abord ouvrir une base de donnees.", false);
+        return;
+      }
+      if (
+        !confirm(
+          "Nettoyer les donnees ?\\n\\n" +
+            "Cette operation va remplacer toutes les valeurs vides (NaN/Null) par :\\n" +
+            "- 'Non specifie' pour les colonnes texte\\n" +
+            "- 0 pour les colonnes numeriques\\n\\n" +
+            "Continuer ?",
+        )
+      )
+        return;
+
+      showGlobalProgress(30, true);
+      showNotificationWithProgress("Nettoyage en cours...", 30, true);
+
+      try {
+        const activeDbPath = sessionStorage.getItem("current_db_path");
+        const result =
+          await window.pywebview.api.clean_database_values(activeDbPath);
+        showGlobalProgress(100, true);
+
+        if (result && result.success) {
+          showNotification(result.message, true);
+          logUserAction(`Nettoyage de la base`);
+        } else {
+          showNotification(
+            result?.message || "Erreur lors du nettoyage.",
+            false,
+          );
+        }
+      } catch (err) {
+        console.error(err);
+        showNotification("Erreur lors du nettoyage.", false);
+      }
+    });
+  }
+
+  // Et pour l'export Excel :
+  const btnExportExcel = document.getElementById("btn-export-excel");
+  if (btnExportExcel) {
+    btnExportExcel.addEventListener("click", async () => {
+      if (!isDbOpen) {
+        showNotification("Veuillez d'abord ouvrir une base de donnees.", false);
+        return;
+      }
+      try {
+        const saveResult =
+          await window.pywebview.api.select_excel_export_file();
+        if (!saveResult || !saveResult.success) return;
+
+        showGlobalProgress(30, true);
+        showNotificationWithProgress("Export Excel en cours...", 30, true);
+
+        const activeDbPath = sessionStorage.getItem("current_db_path");
+        const result = await window.pywebview.api.export_database_to_excel(
+          saveResult.file_path,
+          activeDbPath,
+        );
+
+        showGlobalProgress(100, true);
+
+        if (result && result.success) {
+          showNotification(result.message, true);
+          logUserAction(`Export Excel reussi`);
+        } else {
+          showNotification(
+            result?.message || "Erreur lors de l'export.",
+            false,
+          );
+        }
+      } catch (err) {
+        console.error(err);
+        showNotification("Erreur lors de l'export Excel.", false);
+      }
+    });
+  }
+
   const btnExportResult = document.getElementById("btn-export-result");
   if (btnExportResult) {
     btnExportResult.addEventListener("click", () => {
