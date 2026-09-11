@@ -23,24 +23,13 @@ from repositories.system_database import initialize_database, user_count
 # DETECTION DU MODE D'EXECUTION (DEV vs EXE PyInstaller)
 # ============================================================
 def get_app_data_dir() -> Path:
-    """
-    Retourne le dossier ou stocker les donnees utilisateur (persistant).
-
-    - Mode EXE PyInstaller : %APPDATA%/DataManager/data (Windows)
-                             ~/.local/share/DataManager/data (Linux/macOS)
-    - Mode DEV             : <projet>/data
-
-    Le dossier est cree automatiquement s'il n'existe pas.
-    """
     if getattr(sys, "frozen", False):
-        # Mode EXE : utiliser un dossier PERSISTANT
         if sys.platform == "win32":
             base = Path(os.environ.get("APPDATA", os.path.expanduser("~")))
         else:
             base = Path(os.path.expanduser("~/.local/share"))
         app_dir = base / "DataManager"
     else:
-        # Mode DEV : dossier du projet
         app_dir = Path(__file__).resolve().parent
 
     data_dir = app_dir / "data"
@@ -49,12 +38,6 @@ def get_app_data_dir() -> Path:
 
 
 def get_resource_path(relative_path: str) -> Path:
-    """
-    Retourne le chemin vers une ressource embarquee (web/index.html...).
-
-    - Mode EXE : _MEIPASS (dossier temporaire PyInstaller) ou dossier de l'exe
-    - Mode DEV : dossier du projet
-    """
     if getattr(sys, "frozen", False):
         base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
     else:
@@ -87,13 +70,6 @@ class Api:
     # CONNEXION SQLITE COMPATIBLE MULTI-THREAD
     # ============================================================
     def _connect_db(self, db_path: str, row_factory=None):
-        """
-        Ouvre une connexion SQLite compatible multi-thread.
-
-        pywebview execute les appels API dans un thread different du thread
-        principal. Sans check_same_thread=False, SQLite leve l'erreur :
-        'SQLite objects created in a thread can only be used in that same thread'.
-        """
         conn = sqlite3.connect(db_path, check_same_thread=False, timeout=30.0)
         try:
             conn.execute("PRAGMA journal_mode=WAL;")
@@ -105,7 +81,6 @@ class Api:
         return conn
 
     def _safe_close_connection(self, conn):
-        """Ferme proprement une connexion SQLite avec checkpoint WAL."""
         if conn is None:
             return
         try:
@@ -118,7 +93,6 @@ class Api:
             pass
 
     def _release_resources(self, delay: float = 0.25):
-        """Force le GC et laisse SQLite liberer les fichiers WAL/SHM."""
         try:
             gc.collect()
         except Exception:
@@ -200,19 +174,13 @@ class Api:
 
             self._release_resources(0.15)
 
-            return {
-                "success": True,
-                "message": "Deconnexion reussie.",
-            }
+            return {"success": True, "message": "Deconnexion reussie."}
         except Exception:
             self.current_user = None
             self._active_db_path = None
             self._last_db_path = None
             self._is_loading = False
-            return {
-                "success": True,
-                "message": "Deconnexion reussie.",
-            }
+            return {"success": True, "message": "Deconnexion reussie."}
 
     # ============================================================
     # TERMINER LA BASE DE DONNEES
@@ -263,10 +231,7 @@ class Api:
             self._last_db_path = None
             self._is_loading = False
             self._loading_start_time = None
-            return {
-                "success": True,
-                "message": "Base de donnees terminee.",
-            }
+            return {"success": True, "message": "Base de donnees terminee."}
 
     def quit_app(self):
         global _APP_WINDOW
@@ -333,21 +298,12 @@ class Api:
     # SUPPRESSION DE BASE DE DONNEES
     # ============================================================
     def delete_database(self, db_path: str):
-        """
-        Supprime definitivement une base de donnees (.db) du dossier data/.
-
-        Protections :
-        - system.db ne peut JAMAIS etre supprime
-        - La base actuellement ouverte est fermee automatiquement
-        - Fichiers annexes WAL/SHM supprimes aussi
-        """
         try:
             if not db_path or not str(db_path).strip():
                 return {"success": False, "message": "Le chemin est vide."}
 
             db_file = Path(db_path).resolve()
 
-            # Securite : reste dans le dossier DATA_DIR
             try:
                 db_file.relative_to(DATA_DIR.resolve())
             except ValueError:
@@ -414,7 +370,6 @@ class Api:
     # SUPPRESSION DE TABLE
     # ============================================================
     def delete_table(self, table_name: str, file_path: str = None):
-        """Supprime une table dans la base active (sauf tables systeme)."""
         try:
             if not table_name or not str(table_name).strip():
                 return {"success": False, "message": "Le nom de la table est requis."}
@@ -465,7 +420,6 @@ class Api:
     # FORMATAGE EXCEL PROFESSIONNEL
     # ============================================================
     def _apply_professional_formatting(self, writer, sheet_name: str, df: pd.DataFrame):
-        """Applique une mise en forme professionnelle a une feuille Excel."""
         try:
             from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
             from openpyxl.utils import get_column_letter
@@ -500,12 +454,8 @@ class Api:
                 cell.alignment = header_alignment
                 cell.border = thin_border
 
-            alt_fill_1 = PatternFill(
-                start_color="FFFFFF", end_color="FFFFFF", fill_type="solid"
-            )
-            alt_fill_2 = PatternFill(
-                start_color="F8FAFC", end_color="F8FAFC", fill_type="solid"
-            )
+            alt_fill_1 = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
+            alt_fill_2 = PatternFill(start_color="F8FAFC", end_color="F8FAFC", fill_type="solid")
             cell_alignment = Alignment(vertical="center", wrap_text=False)
 
             for row_idx in range(2, max_row + 1):
@@ -681,7 +631,6 @@ class Api:
     # EXPORT EXCEL
     # ============================================================
     def export_database_to_excel_from_path(self, db_path: str, output_excel_path: str):
-        """Export professionnel : chaque table devient une feuille."""
         try:
             if not db_path or not os.path.exists(db_path):
                 return {"success": False, "message": "Base de donnees introuvable."}
@@ -728,7 +677,6 @@ class Api:
             return {"success": False, "message": str(e)}
 
     def export_database_to_excel(self, output_excel_path: str, file_path: str = None):
-        """Export professionnel de la base active."""
         try:
             db_path = self._get_db_path(file_path)
             if not db_path:
@@ -773,28 +721,14 @@ class Api:
             return {"success": False, "message": str(e)}
 
     # ============================================================
-    # CREATION DES LISTES MERES  (SANS DEDOUBLONNAGE)
+    # CREATION DES LISTES MERES (SANS DEDOUBLONNAGE)
     # ============================================================
     def create_master_list(self, file_path: str = None):
-        """
-        Cree une table 'listes_meres' contenant TOUTES les personnes de TOUTES
-        les tables, SANS aucun dedoublonnage.
-
-        Ajoute deux colonnes de tracabilite :
-        - source_table  : nom de la table d'origine
-        - ligne_origine : rowid de la ligne dans sa table d'origine
-
-        L'utilisateur peut ensuite utiliser l'outil 'Trouver les doublons'
-        pour identifier et supprimer manuellement les doublons CIN+NOM.
-
-        Seules les lignes dont le nom est vide sont ignorees.
-        """
         try:
             db_path = self._get_db_path(file_path)
             if not db_path:
                 return {"success": False, "message": "Aucune base active."}
 
-            # Fermer la connexion eventuellement ouverte par DatabaseService
             try:
                 self._database_service.close_database()
             except Exception:
@@ -825,7 +759,6 @@ class Api:
                 total_noms_vides_ignores = 0
 
                 def norm(v):
-                    """Normalise une valeur en chaine propre (sans 'nan'/None)."""
                     if v is None:
                         return ""
                     s = str(v).strip()
@@ -835,7 +768,6 @@ class Api:
 
                 for table in tables:
                     try:
-                        # Lire avec le rowid d'origine pour tracabilite
                         df = pd.read_sql_query(
                             f'SELECT rowid AS __ligne_origine__, * FROM "{table}"',
                             conn,
@@ -845,7 +777,6 @@ class Api:
 
                         total_lignes_lues += len(df)
 
-                        # --- Detection des colonnes ---
                         cin_col = nom_col = commune_col = fkt_col = annee_col = hf_col = None
                         region_col = district_col = filieres_col = None
                         categorisation_col = variete_col = opr_col = None
@@ -882,11 +813,9 @@ class Api:
                             elif "pole" in cl or "podev" in cl:
                                 pole_col = c
 
-                        # --- Lecture ligne par ligne SANS dedoublonnage ---
                         for idx, row in df.iterrows():
                             nom_val = norm(row.get(nom_col, "")) if nom_col else ""
 
-                            # Ignorer seulement les lignes sans nom
                             if not nom_val:
                                 total_noms_vides_ignores += 1
                                 continue
@@ -922,7 +851,6 @@ class Api:
                         "message": "Aucune personne valide trouvee.",
                     }
 
-                # --- Ecriture de la table listes_meres ---
                 cursor.execute('DROP TABLE IF EXISTS "listes_meres"')
                 cursor.execute('''
                     CREATE TABLE "listes_meres" (
@@ -985,9 +913,7 @@ class Api:
                 "message": (
                     f"Liste mere creee avec {S} personne(s) (TOUTES les lignes brutes, "
                     f"AUCUN dedoublonnage). "
-                    f"[{N} lignes lues, {total_noms_vides_ignores} noms vides ignores] "
-                    f"Utilisez maintenant l'outil 'Trouver les doublons' pour "
-                    f"identifier et supprimer manuellement les doublons CIN+NOM."
+                    f"[{N} lignes lues, {total_noms_vides_ignores} noms vides ignores]"
                 ),
                 "total_persons": S,
                 "tables_scanned": len(tables),
@@ -1004,7 +930,6 @@ class Api:
     # REQUETES STATISTIQUES
     # ============================================================
     def execute_statistical_query(self, query_type: str, params: Dict[str, Any] = None, file_path: str = None):
-        """Execute des requetes statistiques predefinies."""
         try:
             db_path = self._get_db_path(file_path)
             if not db_path:
@@ -1409,7 +1334,7 @@ class Api:
             return {"success": False, "message": str(e), "databases": []}
 
     # ============================================================
-    # OUVRIR UNE BASE (version renforcee anti-thread-zombie)
+    # OUVRIR UNE BASE
     # ============================================================
     def open_database(self, path: str):
         try:
@@ -1430,7 +1355,6 @@ class Api:
                     "message": f"La base de donnees n'existe pas : {resolved_path}",
                 }
 
-            # Si on reouvre la meme base qui est deja ouverte, on la ferme
             if self._active_db_path == resolved_path:
                 try:
                     self._database_service.close_database()
@@ -1443,7 +1367,6 @@ class Api:
             self._is_loading = True
             self._loading_start_time = time.time()
 
-            # Fermer toute base precedemment ouverte
             if self._active_db_path and self._active_db_path != resolved_path:
                 try:
                     self._database_service.close_database()
@@ -1572,21 +1495,35 @@ class Api:
         finally:
             self._safe_close_connection(conn)
 
+    # ✅ NOUVEAU : get_table_rows retourne total_count
     def get_table_rows(self, table_name: str, file_path: str = None, limit: int = 1000):
         conn = None
         try:
             db_path = self._get_db_path(file_path)
             if not db_path:
-                return {"success": False, "message": "Aucune base active.", "data": []}
+                return {"success": False, "message": "Aucune base active.", "data": [], "total_count": 0}
 
             conn = self._connect_db(db_path)
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
+
+            # ✅ Compter le total AVANT la limite
+            cursor.execute(f'SELECT COUNT(*) FROM "{table_name}"')
+            total_count = cursor.fetchone()[0]
+
+            # ✅ Puis retourner les lignes limitees
             cursor.execute(f'SELECT * FROM "{table_name}" LIMIT {limit}')
             rows = [dict(row) for row in cursor.fetchall()]
-            return {"success": True, "data": rows}
+
+            return {
+                "success": True,
+                "data": rows,
+                "total_count": total_count,
+                "returned_count": len(rows),
+                "limit_applied": limit,
+            }
         except Exception as e:
-            return {"success": False, "message": str(e), "data": []}
+            return {"success": False, "message": str(e), "data": [], "total_count": 0}
         finally:
             self._safe_close_connection(conn)
 
@@ -1857,7 +1794,7 @@ class Api:
             self._safe_close_connection(conn)
 
     # ============================================================
-    # DOUBLONS  (rowid robuste)
+    # DOUBLONS
     # ============================================================
     def scan_table_duplicates_advanced(
         self, table_name: str, algorithm: str = "general", file_path: str = None
@@ -1925,7 +1862,6 @@ class Api:
                 return {"success": True, "duplicates": duplicates, "algorithm": "general"}
 
             elif algorithm == "cin_nom":
-                # Lecture explicite du rowid avec alias unique
                 df = pd.read_sql_query(
                     f'SELECT rowid AS __sqlite_rowid__, * FROM "{table_name}"',
                     conn,
@@ -1995,7 +1931,6 @@ class Api:
                 duplicates = []
                 processed = set()
 
-                # Construire rows_list en utilisant __sqlite_rowid__
                 rows_list = []
                 for idx, row in df.iterrows():
                     row_data = {
@@ -2105,6 +2040,146 @@ class Api:
             return {"success": False, "message": str(e)}
         finally:
             self._safe_close_connection(conn)
+
+    # ✅ NOUVEAU : suppression EN LOT ultra-rapide
+    def delete_duplicates_batch(self, duplicates: List[Dict[str, Any]], file_path: str = None):
+        """
+        Supprime EN LOT une liste de doublons.
+
+        Optimisations :
+        - UNE seule connexion SQLite
+        - UNE seule transaction (BEGIN/COMMIT)
+        - PRAGMA synchronous=OFF + journal_mode=MEMORY
+        - DELETE par batch de 500 avec clause IN
+        - Groupement par table
+
+        Resultat : 30 000 lignes supprimees en 3-8 secondes
+        """
+        import time as _time
+        start_time = _time.time()
+
+        try:
+            db_path = self._get_db_path(file_path)
+            if not db_path:
+                return {"success": False, "message": "Aucune base active."}
+
+            if not duplicates:
+                return {"success": True, "total": 0, "deleted": 0, "errors": 0}
+
+            # --- 1. Grouper les rowids par table ---
+            grouped: Dict[str, List[int]] = {}
+            for dup in duplicates:
+                table_name = dup.get("tableName") or dup.get("table")
+                row_index = dup.get("row_index")
+                if not table_name or row_index is None:
+                    continue
+                try:
+                    row_id = int(row_index)
+                except (ValueError, TypeError):
+                    continue
+                grouped.setdefault(table_name, []).append(row_id)
+
+            if not grouped:
+                return {
+                    "success": False,
+                    "message": "Aucun doublon valide a supprimer.",
+                    "total": len(duplicates),
+                    "deleted": 0,
+                    "errors": len(duplicates),
+                }
+
+            # --- 2. Suppression en une seule transaction ---
+            conn = self._connect_db(db_path)
+            details: Dict[str, int] = {}
+            total_deleted = 0
+            total_errors = 0
+
+            try:
+                cursor = conn.cursor()
+
+                # Optimisations SQLite
+                try:
+                    cursor.execute("PRAGMA synchronous=OFF;")
+                    cursor.execute("PRAGMA journal_mode=MEMORY;")
+                    cursor.execute("PRAGMA temp_store=MEMORY;")
+                except Exception:
+                    pass
+
+                cursor.execute("BEGIN TRANSACTION;")
+
+                for table_name, row_ids in grouped.items():
+                    if not row_ids:
+                        continue
+
+                    safe_table = str(table_name).replace('"', '""')
+                    deleted_for_table = 0
+
+                    # Verifier que la table existe
+                    cursor.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+                        (table_name,),
+                    )
+                    if not cursor.fetchone():
+                        total_errors += len(row_ids)
+                        continue
+
+                    # DELETE par batch de 500
+                    BATCH_SIZE = 500
+                    for i in range(0, len(row_ids), BATCH_SIZE):
+                        batch = row_ids[i : i + BATCH_SIZE]
+                        try:
+                            placeholders = ",".join("?" * len(batch))
+                            cursor.execute(
+                                f'DELETE FROM "{safe_table}" WHERE rowid IN ({placeholders})',
+                                batch,
+                            )
+                            deleted_for_table += cursor.rowcount
+                        except Exception as e:
+                            print(f"[WARN] Erreur batch table '{table_name}': {e}")
+                            total_errors += len(batch)
+
+                    details[table_name] = deleted_for_table
+                    total_deleted += deleted_for_table
+
+                cursor.execute("COMMIT;")
+
+                # Restaurer parametres de securite
+                try:
+                    cursor.execute("PRAGMA synchronous=NORMAL;")
+                    cursor.execute("PRAGMA journal_mode=WAL;")
+                except Exception:
+                    pass
+
+            except Exception as e:
+                try:
+                    conn.execute("ROLLBACK;")
+                except Exception:
+                    pass
+                raise e
+            finally:
+                self._safe_close_connection(conn)
+
+            elapsed = round(_time.time() - start_time, 2)
+
+            return {
+                "success": True,
+                "total": len(duplicates),
+                "deleted": total_deleted,
+                "errors": total_errors,
+                "elapsed_seconds": elapsed,
+                "details": details,
+            }
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return {
+                "success": False,
+                "message": f"Erreur lors de la suppression en lot : {e}",
+                "total": len(duplicates) if duplicates else 0,
+                "deleted": 0,
+                "errors": len(duplicates) if duplicates else 0,
+            }
 
     def clean_database_values(self, file_path: str = None):
         conn = None
@@ -2240,10 +2315,6 @@ class Api:
     def import_excel_to_database(
         self, file_path: str, sheet_name: str = None, table_name: str = None
     ):
-        """
-        Import renforce : ferme toute base ouverte avant, libere les ressources
-        apres l'ecriture, puis ouvre la nouvelle base sans conflit de thread.
-        """
         try:
             if not file_path or not str(file_path).strip():
                 return {"success": False, "message": "Le fichier Excel est requis."}
@@ -2256,7 +2327,6 @@ class Api:
             db_filename = f"{safe_db_name}.db"
             db_path = data_dir / db_filename
 
-            # Fermer toute base ouverte AVANT l'import
             if self._active_db_path:
                 try:
                     self._database_service.close_database()
@@ -2325,7 +2395,6 @@ class Api:
             finally:
                 self._safe_close_connection(conn)
 
-            # Liberer les ressources avant d'ouvrir la nouvelle base
             self._release_resources(0.35)
 
             open_result = self.open_database(str(db_path))
@@ -2437,7 +2506,7 @@ class Api:
             }
 
     # ============================================================
-    # EXPORTATION EXCEL (fichier de sortie)
+    # EXPORTATION EXCEL
     # ============================================================
     def select_excel_export_file(self):
         global _APP_WINDOW
@@ -2605,7 +2674,6 @@ class Api:
 def main():
     global _APP_WINDOW
 
-    # Initialiser system.db dans le dossier PERSISTANT
     initialize_database()
 
     api = Api()
