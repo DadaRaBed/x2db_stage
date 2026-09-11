@@ -23,7 +23,7 @@ from repositories.system_database import initialize_database, user_count
 # CONFIGURATION APPLICATION
 # ============================================================
 APP_NAME = "xl2db"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
 DEVELOPER_NAME = "DadaRaBed"
 DEVELOPER_EMAIL = "nanoonadjah3@gmail.com"
 GITHUB_REPO = "DadaRaBed/xl2db_stage"
