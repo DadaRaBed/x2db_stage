@@ -65,6 +65,9 @@ let createDbExcelPath = "";
 let createDbExcelSheets = [];
 let createDbSelectedSheet = "";
 
+// ✅ Historique de navigation (pour le bouton Precedent)
+let navigationHistory = [];
+
 // Attributs a filtrer
 const FILTER_ATTRIBUTES = [
   "pole_de_developpement",
@@ -96,6 +99,66 @@ function escapeHtml(str) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
+}
+
+// ✅ Navigation : enregistre la vue courante dans l'historique
+function pushNavigationHistory(viewName) {
+  const current = navigationHistory[navigationHistory.length - 1];
+  if (current !== viewName) {
+    navigationHistory.push(viewName);
+  }
+}
+
+// ✅ Navigation : retour a la vue precedente
+function goBack() {
+  if (navigationHistory.length <= 1) {
+    // Rien dans l'historique, on va au dashboard
+    goToDashboard();
+    return;
+  }
+
+  // Retirer la vue courante
+  navigationHistory.pop();
+  const previousView = navigationHistory[navigationHistory.length - 1];
+
+  // Naviguer vers la vue precedente SANS reinitialiser son etat
+  switch (previousView) {
+    case "dashboard":
+      showView(dashboardView);
+      refreshDatabaseStatus();
+      break;
+    case "existingDb":
+      showView(existingDbView);
+      loadDataDirectoryDatabases();
+      updateTerminateButtonVisibility();
+      setTimeout(() => restoreDbState(), 200);
+      break;
+    case "duplicates":
+      showView(duplicatesView);
+      updateTerminateButtonVisibility();
+      loadDuplicateTableFilter();
+      // Ne PAS reset : conserver les resultats affiches
+      break;
+    case "manipulate":
+      showView(manipulateView);
+      updateTerminateButtonVisibility();
+      setTimeout(() => {
+        loadManipulateTables().then(() => {
+          if (currentManipulateTable) {
+            loadManipulateTableData(currentManipulateTable);
+          }
+        });
+      }, 200);
+      break;
+    case "createDb":
+      showView(createDbView);
+      break;
+    case "excelImport":
+      showView(excelImportView);
+      break;
+    default:
+      goToDashboard();
+  }
 }
 
 function showView(viewElement) {
@@ -313,6 +376,10 @@ function showDashboard(user) {
   currentLoggedInUser = user;
   window.lastLoggedInUser = user;
   sessionStorage.setItem("session_active", "true");
+
+  // ✅ Reinitialiser l'historique a l'arrivee sur le dashboard
+  navigationHistory = ["dashboard"];
+
   showView(dashboardView);
 
   const pseudo = user.pseudo || "";
@@ -339,6 +406,9 @@ function showDashboard(user) {
 function goToDashboard() {
   saveCurrentDbState();
 
+  // ✅ Reinitialiser l'historique quand on va explicitement au dashboard
+  navigationHistory = ["dashboard"];
+
   if (window.lastLoggedInUser) {
     showDashboard(window.lastLoggedInUser);
   } else {
@@ -353,6 +423,7 @@ function goToDashboard() {
 
 function goToExistingDb() {
   saveCurrentDbState();
+  pushNavigationHistory("existingDb");
   showView(existingDbView);
   loadDataDirectoryDatabases();
   updateTerminateButtonVisibility();
@@ -368,10 +439,12 @@ function goToDuplicates() {
     return;
   }
   saveCurrentDbState();
+  pushNavigationHistory("duplicates");
   showView(duplicatesView);
   updateTerminateButtonVisibility();
   loadDuplicateTableFilter();
-  resetDuplicateView();
+  // Ne PAS reset la vue si on y retourne (conserver les resultats)
+  // resetDuplicateView() est appele seulement a l'ouverture initiale via btn-check-duplicates
 }
 
 function resetDuplicateView() {
@@ -420,7 +493,6 @@ async function deleteSelectedDatabase() {
   try {
     await waitForApi();
 
-    // Si la base est actuellement ouverte, la fermer d'abord cote client
     const openedPath = sessionStorage.getItem("current_db_path");
     if (openedPath && openedPath === dbPath && isDbOpen) {
       try {
@@ -456,7 +528,6 @@ async function deleteSelectedDatabase() {
       showNotification(result.message || "Base supprimee avec succes.", true);
       logUserAction(`Suppression de la base : ${result.db_name || fileName}`);
 
-      // Rafraichir la liste et vider le select
       selectEl.value = "";
       const label = document.getElementById("selected-db-path-label");
       if (label) {
@@ -517,8 +588,6 @@ async function deleteSelectedTable(tableName) {
       );
       logUserAction(`Suppression de la table : ${tableName}`);
 
-      // Si la table supprimee est celle actuellement ouverte dans manipulation,
-      // reinitialiser la vue
       if (currentManipulateTable === tableName) {
         currentManipulateTable = "";
         currentManipulateData = [];
@@ -533,7 +602,6 @@ async function deleteSelectedTable(tableName) {
         await loadManipulateTables();
       }
 
-      // Rafraichir la structure si affichee
       const toggleChecked = document.getElementById(
         "toggle-show-tables-list",
       )?.checked;
@@ -541,7 +609,6 @@ async function deleteSelectedTable(tableName) {
         await loadDatabaseDetails(activeDbPath);
       }
 
-      // Rafraichir le filtre de tables pour les doublons
       await loadDuplicateTableFilter();
     } else {
       showNotification(
@@ -640,6 +707,7 @@ async function logoutUser() {
       currentLoggedInUser = null;
       window.lastLoggedInUser = null;
       isDbOpen = false;
+      navigationHistory = [];
 
       document.querySelectorAll(".user-menu").forEach((menu) => {
         menu.classList.add("hidden");
@@ -1292,7 +1360,6 @@ function renderDatabaseStructureMatrix(structure, containerElement) {
     tableGroupEl.style.flexDirection = "column";
     tableGroupEl.style.gap = "0.5rem";
 
-    // Conteneur de ligne : bouton table + bouton supprimer
     const headerRow = document.createElement("div");
     headerRow.style.display = "flex";
     headerRow.style.gap = "0.5rem";
@@ -1319,7 +1386,6 @@ function renderDatabaseStructureMatrix(structure, containerElement) {
     tableButton.appendChild(titleSpan);
     tableButton.appendChild(arrowSpan);
 
-    // ✅ Bouton supprimer la table
     const deleteBtn = document.createElement("button");
     deleteBtn.type = "button";
     deleteBtn.className = "btn-delete-table";
@@ -1505,9 +1571,11 @@ async function createMasterList() {
       "Voulez-vous creer la liste mere ?\n\n" +
         "Cette operation va :\n" +
         "- Scanner toutes les tables de la base\n" +
-        "- Extraire toutes les personnes distinctes (sans doublons)\n" +
-        "- Ignorer les lignes sans nom et prenoms\n" +
-        "- Creer une nouvelle table 'listes_meres' dans la base\n\n" +
+        "- Copier TOUTES les lignes (sans dedoublonnage)\n" +
+        "- Ajouter les colonnes 'source_table' et 'ligne_origine'\n" +
+        "- Ignorer les lignes sans nom et prenoms\n\n" +
+        "Vous pourrez ensuite utiliser 'Trouver les doublons' pour\n" +
+        "identifier et supprimer manuellement les doublons.\n\n" +
         "Continuer ?",
     )
   ) {
@@ -1531,15 +1599,11 @@ async function createMasterList() {
 
     if (result?.success) {
       let msg = result.message || "Liste mere creee avec succes.";
-      if (result.total_noms_vides_ignores > 0) {
-        msg += `\n\n${result.total_noms_vides_ignores} ligne(s) ignoree(s) car nom vide.`;
-      }
       showNotification(msg, true);
       logUserAction(
         `Creation de la liste mere : ${result.total_persons} personne(s)`,
       );
 
-      // Recharger la liste des tables
       const toggleChecked = document.getElementById(
         "toggle-show-tables-list",
       )?.checked;
@@ -1840,8 +1904,8 @@ function openEditModal(tableName, rowId, rowData, isNew = false) {
 // GESTION DES DOUBLONS
 // ============================================
 async function loadDuplicateTableFilter() {
-  const filterSelect = document.getElementById("dup-table-filter");
-  if (!filterSelect) return;
+  const container = document.getElementById("dup-tables-checkboxes");
+  if (!container) return;
 
   try {
     await waitForApi();
@@ -1849,18 +1913,53 @@ async function loadDuplicateTableFilter() {
     const tablesRes =
       await window.pywebview.api.get_database_table_names(activeDbPath);
 
-    if (tablesRes && tablesRes.success) {
-      filterSelect.innerHTML =
-        '<option value="">-- Toutes les tables --</option>';
+    if (tablesRes && tablesRes.success && tablesRes.tables.length > 0) {
+      container.innerHTML = "";
       tablesRes.tables.forEach((table) => {
-        const opt = document.createElement("option");
-        opt.value = table;
-        opt.textContent = table;
-        filterSelect.appendChild(opt);
+        const label = document.createElement("label");
+        label.className = "dup-table-checkbox-label checked";
+        label.innerHTML = `
+          <input type="checkbox" class="dup-table-checkbox" value="${escapeHtml(table)}" checked />
+          <span>${escapeHtml(table)}</span>
+        `;
+        const chk = label.querySelector("input");
+        chk.addEventListener("change", () => {
+          if (chk.checked) {
+            label.classList.add("checked");
+          } else {
+            label.classList.remove("checked");
+          }
+          updateDuplicateTablesInfo();
+        });
+        container.appendChild(label);
       });
+
+      updateDuplicateTablesInfo();
+    } else {
+      container.innerHTML =
+        '<span style="color: #999; font-style: italic;">Aucune table disponible.</span>';
+      const info = document.getElementById("dup-tables-info");
+      if (info) info.textContent = "0 table(s) selectionnee(s)";
     }
   } catch (e) {
     console.error("Erreur lors du chargement des tables pour le filtre:", e);
+  }
+}
+
+// ✅ Met a jour le compteur de tables selectionnees
+function updateDuplicateTablesInfo() {
+  const checkboxes = document.querySelectorAll(".dup-table-checkbox:checked");
+  const total = document.querySelectorAll(".dup-table-checkbox").length;
+  const info = document.getElementById("dup-tables-info");
+  if (info) {
+    info.textContent = `${checkboxes.length} / ${total} table(s) selectionnee(s)`;
+    info.style.color =
+      checkboxes.length === 0
+        ? "#dc3545"
+        : checkboxes.length === total
+          ? "#27ae60"
+          : "#64748b";
+    info.style.fontWeight = "600";
   }
 }
 
@@ -1870,16 +1969,21 @@ function initDuplicatesPage() {
   const cancelBtn = document.querySelector("#btn-cancel-dup-scan");
   const refreshTablesBtn = document.querySelector("#btn-refresh-tables");
   const refreshDupsBtn = document.querySelector("#btn-refresh-dups");
-  const tableFilter = document.querySelector("#dup-table-filter");
   const btnSelectAll = document.querySelector("#btn-select-all-dups");
   const btnEditDups = document.querySelector("#btn-edit-selected-dups");
   const btnDeleteDups = document.querySelector("#btn-delete-selected-dups");
+  const btnDeleteAllDups = document.querySelector("#btn-delete-all-dups");
   const btnExportDups = document.querySelector("#btn-export-dups");
   const btnExpandDups = document.querySelector("#btn-expand-dups");
   const btnAddDup = document.querySelector("#btn-add-dups");
 
+  const btnCheckAllTables = document.querySelector("#btn-check-all-tables");
+  const btnUncheckAllTables = document.querySelector("#btn-uncheck-all-tables");
+
   if (btnCheckDups) {
     btnCheckDups.addEventListener("click", () => {
+      // Reset seulement quand on ouvre depuis le menu principal
+      resetDuplicateView();
       goToDuplicates();
     });
   }
@@ -1916,10 +2020,23 @@ function initDuplicatesPage() {
     });
   }
 
-  if (tableFilter) {
-    tableFilter.addEventListener("change", () => {
-      selectedDuplicateTables = tableFilter.value ? [tableFilter.value] : [];
-      renderDuplicatesWithFilter();
+  if (btnCheckAllTables) {
+    btnCheckAllTables.addEventListener("click", () => {
+      document.querySelectorAll(".dup-table-checkbox").forEach((chk) => {
+        chk.checked = true;
+        chk.closest(".dup-table-checkbox-label")?.classList.add("checked");
+      });
+      updateDuplicateTablesInfo();
+    });
+  }
+
+  if (btnUncheckAllTables) {
+    btnUncheckAllTables.addEventListener("click", () => {
+      document.querySelectorAll(".dup-table-checkbox").forEach((chk) => {
+        chk.checked = false;
+        chk.closest(".dup-table-checkbox-label")?.classList.remove("checked");
+      });
+      updateDuplicateTablesInfo();
     });
   }
 
@@ -2025,6 +2142,13 @@ function initDuplicatesPage() {
     });
   }
 
+  // ✅ Bouton TOUT SUPPRIMER
+  if (btnDeleteAllDups) {
+    btnDeleteAllDups.addEventListener("click", async () => {
+      await deleteAllDuplicatesWithProgress();
+    });
+  }
+
   if (btnExportDups) {
     btnExportDups.addEventListener("click", () => {
       exportDuplicatesWithDialog();
@@ -2054,15 +2178,24 @@ async function runDuplicateScan(selectedAlgo) {
   const toolbar = document.getElementById("duplicate-actions-toolbar");
   const cancelBtn = document.getElementById("btn-cancel-dup-scan");
   const runBtn = document.getElementById("btn-run-dup-scan");
-  const tableFilter = document.getElementById("dup-table-filter");
 
   if (!resultsBody || !statusDiv) return;
+
+  // ✅ Recuperer les tables cochees
+  const checkedTables = Array.from(
+    document.querySelectorAll(".dup-table-checkbox:checked"),
+  ).map((chk) => chk.value);
+
+  if (checkedTables.length === 0) {
+    showNotification("Veuillez selectionner au moins une table.", false);
+    return;
+  }
 
   resultsContainer.classList.remove("hidden");
   toolbar.classList.remove("hidden");
   resultsBody.innerHTML =
     '<p style="color: var(--text-muted, #64748b);">Analyse en cours...</p>';
-  statusDiv.textContent = `Analyse avec l'algorithme "${selectedAlgo === "general" ? "General" : "CIN + NOM + COMMUNE + FKT"}"...`;
+  statusDiv.textContent = `Analyse avec l'algorithme "${selectedAlgo === "general" ? "General" : "CIN + NOM + COMMUNE + FKT"}" sur ${checkedTables.length} table(s)...`;
   duplicateScanCancelled = false;
 
   if (cancelBtn) cancelBtn.style.display = "inline-block";
@@ -2072,19 +2205,7 @@ async function runDuplicateScan(selectedAlgo) {
     await waitForApi();
     const activeDbPath = sessionStorage.getItem("current_db_path");
 
-    const tablesRes =
-      await window.pywebview.api.get_database_table_names(activeDbPath);
-    if (!tablesRes || !tablesRes.success || tablesRes.tables.length === 0) {
-      resultsBody.innerHTML =
-        "<p>Aucune table trouvee dans cette base de donnees.</p>";
-      return;
-    }
-
-    let tablesToScan = tablesRes.tables;
-    const filterValue = tableFilter?.value;
-    if (filterValue) {
-      tablesToScan = [filterValue];
-    }
+    const tablesToScan = checkedTables;
 
     allDuplicates = [];
 
@@ -2154,19 +2275,16 @@ function renderDuplicatesWithFilter() {
   const resultsBody = document.getElementById("db-results-content");
   if (!resultsBody) return;
 
-  let filteredDuplicates = allDuplicates;
-  if (selectedDuplicateTables.length > 0) {
-    filteredDuplicates = allDuplicates.filter((d) =>
-      selectedDuplicateTables.includes(d.tableName),
-    );
-  }
+  const filteredDuplicates = allDuplicates;
 
   if (filteredDuplicates.length === 0) {
     resultsBody.innerHTML =
-      "<p style='color: var(--warning, #f39c12);'>Aucun doublon a afficher avec les filtres actuels.</p>";
+      "<p style='color: var(--warning, #f39c12);'>Aucun doublon a afficher.</p>";
     return;
   }
 
+  // ✅ On n'affiche que 500 lignes pour eviter de freeze le navigateur,
+  // MAIS le bouton "TOUT SUPPRIMER" traite bien les 29000.
   const MAX_DISPLAY = 500;
   let displayDuplicates = filteredDuplicates;
   let hasMore = false;
@@ -2187,9 +2305,8 @@ function renderDuplicatesWithFilter() {
 
   let html = `
     <div style="margin-bottom: 12px; font-weight: bold; color: var(--primary-color, #4f46e5);">
-      ${filteredDuplicates.length} doublon(s) affiche(s)
-      ${selectedDuplicateTables.length > 0 ? `(filtre sur : ${selectedDuplicateTables.join(", ")})` : ""}
-      ${hasMore ? `<span style="color: orange; font-weight: normal;">(Affichage des ${MAX_DISPLAY} premiers)</span>` : ""}
+      ${filteredDuplicates.length} doublon(s) au total
+      ${hasMore ? `<span style="color: orange; font-weight: normal;">(Affichage des ${MAX_DISPLAY} premiers - Le bouton "TOUT SUPPRIMER" traite bien les ${filteredDuplicates.length})</span>` : ""}
     </div>
     <div class="duplicates-table-wrapper" style="max-height: 500px; overflow: auto;">
       <table style="width: 100%; border-collapse: collapse; font-size: 0.75rem; background: var(--bg-container, #fff);">
@@ -2290,7 +2407,7 @@ function renderDuplicatesWithFilter() {
         </tbody>
       </table>
     </div>
-    ${hasMore ? `<p style="color: orange; font-size: 0.85rem; margin-top: 8px;">${filteredDuplicates.length - MAX_DISPLAY} doublons supplementaires non affiches.</p>` : ""}
+    ${hasMore ? `<p style="color: orange; font-size: 0.85rem; margin-top: 8px;">${filteredDuplicates.length - MAX_DISPLAY} doublons supplementaires non affiches (mais bien pris en compte par "TOUT SUPPRIMER").</p>` : ""}
   `;
 
   resultsBody.innerHTML = html;
@@ -2461,7 +2578,7 @@ async function refreshDuplicateResults() {
 }
 
 // ============================================
-// SUPPRESSION AVEC BARRE DE PROGRESSION
+// SUPPRESSION AVEC BARRE DE PROGRESSION (selection)
 // ============================================
 async function deleteSelectedDuplicatesWithProgress() {
   const checkedBoxes = document.querySelectorAll(".dup-checkbox:checked");
@@ -2601,6 +2718,161 @@ async function deleteSelectedDuplicatesWithProgress() {
 }
 
 // ============================================
+// ✅ TOUT SUPPRIMER (traitement des 29000 doublons)
+// ============================================
+async function deleteAllDuplicatesWithProgress() {
+  if (allDuplicates.length === 0) {
+    showNotification("Aucun doublon a supprimer.", false);
+    return;
+  }
+
+  const total = allDuplicates.length;
+
+  if (
+    !confirm(
+      `ATTENTION : SUPPRESSION MASSIVE\n\n` +
+        `Vous allez supprimer DEFINITIVEMENT ${total} doublon(s)\n` +
+        `(toutes les lignes marquees comme doublons, pas seulement celles affichees).\n\n` +
+        `Cette action est IRREVERSIBLE.\n\n` +
+        `Voulez-vous vraiment continuer ?`,
+    )
+  ) {
+    return;
+  }
+
+  // Double confirmation pour securite
+  if (
+    !confirm(
+      `Derniere confirmation :\n\n` +
+        `${total} ligne(s) vont etre supprimees.\n\n` +
+        `Confirmer la suppression massive ?`,
+    )
+  ) {
+    return;
+  }
+
+  try {
+    await waitForApi();
+    let successCount = 0;
+    let errorCount = 0;
+    const activeDbPath = sessionStorage.getItem("current_db_path");
+
+    showGlobalProgress(0, true);
+
+    const container = document.querySelector("#notification-container");
+    let progressNotif = document.getElementById(
+      "duplicate-delete-all-progress",
+    );
+    if (!progressNotif) {
+      progressNotif = document.createElement("div");
+      progressNotif.id = "duplicate-delete-all-progress";
+      progressNotif.className = "notification notification-error";
+      progressNotif.style.display = "block";
+      progressNotif.style.background = "rgba(139, 0, 0, 0.95)";
+      progressNotif.style.minWidth = "350px";
+      container.appendChild(progressNotif);
+    }
+
+    // Copier la liste pour pouvoir la modifier en toute securite
+    const duplicatesToDelete = [...allDuplicates];
+
+    for (let i = 0; i < duplicatesToDelete.length; i++) {
+      const dup = duplicatesToDelete[i];
+      const tableName = dup.tableName;
+      const rowIndex = dup.row_index;
+
+      if (window.pywebview?.api?.delete_table_row) {
+        try {
+          const res = await window.pywebview.api.delete_table_row(
+            tableName,
+            rowIndex,
+            activeDbPath,
+          );
+          if (res && res.success) {
+            successCount++;
+          } else {
+            errorCount++;
+          }
+        } catch (err) {
+          errorCount++;
+          console.error(`Erreur suppression ligne ${rowIndex}:`, err);
+        }
+      }
+
+      // Mettre a jour le progrès tous les 5 elements (performance)
+      if (i % 5 === 0 || i === duplicatesToDelete.length - 1) {
+        const percentage = Math.round(((i + 1) / total) * 100);
+        const progressText = `Suppression massive en cours... (${i + 1}/${total})`;
+
+        progressNotif.innerHTML = `
+          <div style="font-weight: bold; margin-bottom: 4px;">${progressText}</div>
+          <div style="display: flex; justify-content: space-between; font-size: 0.85rem; opacity: 0.9; margin-bottom: 4px;">
+            <span>Progression : ${percentage}%</span>
+            <span>${successCount} supprimes | ${errorCount} erreurs</span>
+          </div>
+          <div style="width: 100%; background: rgba(255,255,255,0.3); height: 6px; border-radius: 3px; overflow: hidden;">
+            <div style="width: ${percentage}%; background: ${percentage < 100 ? "#ff6b6b" : "#27ae60"}; height: 100%; transition: width 0.3s ease;"></div>
+          </div>
+        `;
+
+        showGlobalProgress(percentage, true);
+
+        // Petit delai pour laisser le rendu visuel se faire
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+    }
+
+    setTimeout(() => {
+      if (progressNotif) {
+        progressNotif.style.display = "none";
+        progressNotif.remove();
+      }
+    }, 3000);
+
+    // Vider completement la liste des doublons
+    allDuplicates = [];
+
+    if (errorCount === 0) {
+      showNotification(
+        `${successCount} doublon(s) supprimes massivement avec succes.`,
+        true,
+      );
+    } else {
+      showNotification(
+        `${successCount} supprimes, ${errorCount} erreurs.`,
+        errorCount === 0,
+      );
+    }
+
+    logUserAction(
+      `Suppression MASSIVE de ${successCount} doublons (${errorCount} erreurs)`,
+    );
+
+    const countBadge = document.getElementById("dup-results-count");
+    if (countBadge) countBadge.textContent = "0";
+
+    renderDuplicatesWithFilter();
+
+    document.getElementById("dup-results-container").classList.add("hidden");
+    const statusDiv = document.getElementById("dup-scan-status");
+    if (statusDiv) {
+      statusDiv.textContent = `Suppression massive terminee : ${successCount} doublon(s) supprime(s).`;
+    }
+  } catch (err) {
+    console.error("Erreur lors de la suppression massive:", err);
+    showNotification("Erreur lors de la suppression massive.", false);
+
+    const progressNotif = document.getElementById(
+      "duplicate-delete-all-progress",
+    );
+    if (progressNotif) {
+      progressNotif.style.display = "none";
+      progressNotif.remove();
+    }
+  }
+}
+
+// ============================================
 // EXPORT DES DOUBLONS
 // ============================================
 async function exportDuplicatesWithDialog() {
@@ -2620,12 +2892,7 @@ async function exportDuplicatesWithDialog() {
 
 async function exportDuplicatesToExcel() {
   try {
-    let filteredDuplicates = allDuplicates;
-    if (selectedDuplicateTables.length > 0) {
-      filteredDuplicates = allDuplicates.filter((d) =>
-        selectedDuplicateTables.includes(d.tableName),
-      );
-    }
+    const filteredDuplicates = allDuplicates;
 
     if (filteredDuplicates.length === 0) {
       showNotification("Aucune donnee a exporter.", false);
@@ -2688,12 +2955,7 @@ async function exportDuplicatesToExcel() {
 
 async function exportDuplicatesToPDF() {
   try {
-    let filteredDuplicates = allDuplicates;
-    if (selectedDuplicateTables.length > 0) {
-      filteredDuplicates = allDuplicates.filter((d) =>
-        selectedDuplicateTables.includes(d.tableName),
-      );
-    }
+    const filteredDuplicates = allDuplicates;
 
     if (filteredDuplicates.length === 0) {
       showNotification("Aucune donnee a exporter.", false);
@@ -2843,6 +3105,7 @@ async function initManipulatePage() {
         return;
       }
       saveCurrentDbState();
+      pushNavigationHistory("manipulate");
       showView(manipulateView);
       updateTerminateButtonVisibility();
       await loadManipulateTables();
@@ -2894,7 +3157,6 @@ async function initManipulatePage() {
     });
   }
 
-  // ✅ Bouton Supprimer la table depuis la vue manipulation
   if (btnDeleteTable) {
     btnDeleteTable.addEventListener("click", () => {
       if (!currentManipulateTable) {
@@ -3021,9 +3283,6 @@ async function initManipulatePage() {
     };
   }
 
-  // ============================================
-  // FILTRER - 2 boutons : Filtrer les resultats + Filtrer les colonnes
-  // ============================================
   const btnFilters = document.querySelector("#btn-manipulate-filters");
   if (btnFilters) {
     btnFilters.onclick = async function () {
@@ -3097,7 +3356,6 @@ async function initManipulatePage() {
             "#btn-filter-columns-mode",
           );
 
-          // Fonction : mode "Filtrer les resultats" (valeurs distinctes)
           function renderFilterResultsMode() {
             btnFilterResultsMode.className = "button button-primary";
             btnFilterResultsMode.style.background = "var(--primary, #4f46e5)";
@@ -3314,7 +3572,6 @@ async function initManipulatePage() {
             };
           }
 
-          // Fonction : mode "Filtrer les colonnes"
           function renderFilterColumnsMode() {
             btnFilterColumnsMode.className = "button button-primary";
             btnFilterColumnsMode.style.background = "var(--primary, #4f46e5)";
@@ -3443,7 +3700,6 @@ async function initManipulatePage() {
             };
           }
 
-          // Boutons de bascule entre les modes
           btnFilterResultsMode.onclick = () => {
             renderFilterResultsMode();
           };
@@ -3452,7 +3708,6 @@ async function initManipulatePage() {
             renderFilterColumnsMode();
           };
 
-          // Afficher par defaut le mode "Filtrer les resultats"
           renderFilterResultsMode();
 
           filtersArea.querySelector("#btn-close-filters").onclick = () => {
@@ -3472,7 +3727,6 @@ async function initManipulatePage() {
     };
   }
 
-  // Fonction : appliquer les filtres par valeur
   function applyValueFilters() {
     if (!currentManipulateData || currentManipulateData.length === 0) return;
 
@@ -4092,7 +4346,6 @@ function openStatisticalQueriesModal() {
       paramsContainer.style.display = "none";
       paramsContainer.innerHTML = "";
 
-      // Cas special : femmes par tranche d'age -> afficher les parametres
       if (queryType === "femmes_par_tranche_age") {
         paramsContainer.style.display = "block";
         paramsContainer.innerHTML = `
@@ -4155,7 +4408,6 @@ function openStatisticalQueriesModal() {
 
           resultsContainer.innerHTML = html;
 
-          // Reattacher les ecouteurs sur les inputs si necessaire
           if (queryType === "femmes_par_tranche_age") {
             const minInput = overlay.querySelector("#stat-age-min");
             const maxInput = overlay.querySelector("#stat-age-max");
@@ -4234,7 +4486,6 @@ function initNewFeatures() {
   const btnOpenDb = document.getElementById("btn-open-database");
   if (btnOpenDb) btnOpenDb.addEventListener("click", openSelectedDatabase);
 
-  // ✅ Nouveau bouton : Supprimer la base selectionnee
   const btnDeleteSelectedDb = document.getElementById("btn-delete-selected-db");
   if (btnDeleteSelectedDb) {
     btnDeleteSelectedDb.addEventListener("click", deleteSelectedDatabase);
@@ -4253,6 +4504,7 @@ function initNewFeatures() {
   if (btnCreateDb) {
     btnCreateDb.addEventListener("click", () => {
       resetCreateDbView();
+      pushNavigationHistory("createDb");
       showView(createDbView);
     });
   }
@@ -4286,17 +4538,20 @@ function initNewFeatures() {
     btnExportCreated.addEventListener("click", exportCreatedDatabaseToExcel);
   }
 
-  // Bouton Creation Listes meres
   const btnCreateMasterList = document.getElementById("btn-create-master-list");
   if (btnCreateMasterList) {
     btnCreateMasterList.addEventListener("click", createMasterList);
   }
 
-  // Bouton Requetes statistiques
   const btnOpenStats = document.getElementById("btn-open-statistical-queries");
   if (btnOpenStats) {
     btnOpenStats.addEventListener("click", openStatisticalQueriesModal);
   }
+
+  // ✅ Boutons "Precedent" dans les topbars
+  document.querySelectorAll(".btn-back-global").forEach((btn) => {
+    btn.addEventListener("click", goBack);
+  });
 }
 
 // ============================================
@@ -4882,6 +5137,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   importExcelButton?.addEventListener("click", () => {
     resetExcelImportView();
+    pushNavigationHistory("excelImport");
     showView(excelImportView);
   });
 

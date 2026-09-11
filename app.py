@@ -773,21 +773,21 @@ class Api:
             return {"success": False, "message": str(e)}
 
     # ============================================================
-    # CREATION DES LISTES MERES
+    # CREATION DES LISTES MERES  (SANS DEDOUBLONNAGE)
     # ============================================================
     def create_master_list(self, file_path: str = None):
         """
-        Cree une table 'listes_meres' contenant toutes les personnes distinctes.
+        Cree une table 'listes_meres' contenant TOUTES les personnes de TOUTES
+        les tables, SANS aucun dedoublonnage.
 
-        Regles :
-        - Critere doublon avec CIN rempli : CIN + NOM + COMMUNE + FKT
-        - Critere doublon avec CIN vide : NOM + COMMUNE + FKT + ANNEE + H_F
-        - Fusion : completer uniquement les vides de la reference
-        - Conflit : prendre la premiere occurrence (reference)
-        - Observation : nom de la 1ere table uniquement
-        - CIN vide : afficher "CIN non specifie"
-        - Ordre des tables : ordre alphabetique
-        - EXCLUSION : lignes dont nom_et_prenoms est vide
+        Ajoute deux colonnes de tracabilite :
+        - source_table  : nom de la table d'origine
+        - ligne_origine : rowid de la ligne dans sa table d'origine
+
+        L'utilisateur peut ensuite utiliser l'outil 'Trouver les doublons'
+        pour identifier et supprimer manuellement les doublons CIN+NOM.
+
+        Seules les lignes dont le nom est vide sont ignorees.
         """
         try:
             db_path = self._get_db_path(file_path)
@@ -821,26 +821,35 @@ class Api:
                 tables = sorted(tables)
 
                 all_persons = []
-                seen_keys = set()
                 total_lignes_lues = 0
-                total_doublons_ignores = 0
-                total_fusions = 0
                 total_noms_vides_ignores = 0
+
+                def norm(v):
+                    """Normalise une valeur en chaine propre (sans 'nan'/None)."""
+                    if v is None:
+                        return ""
+                    s = str(v).strip()
+                    if s.upper() in ("NAN", "NONE", "NULL"):
+                        return ""
+                    return s
 
                 for table in tables:
                     try:
-                        df = pd.read_sql_query(f'SELECT * FROM "{table}"', conn)
+                        # Lire avec le rowid d'origine pour tracabilite
+                        df = pd.read_sql_query(
+                            f'SELECT rowid AS __ligne_origine__, * FROM "{table}"',
+                            conn,
+                        )
                         if df.empty:
                             continue
 
                         total_lignes_lues += len(df)
 
-                        cin_col = None
-                        nom_col = None
-                        commune_col = None
-                        fkt_col = None
-                        annee_col = None
-                        hf_col = None
+                        # --- Detection des colonnes ---
+                        cin_col = nom_col = commune_col = fkt_col = annee_col = hf_col = None
+                        region_col = district_col = filieres_col = None
+                        categorisation_col = variete_col = opr_col = None
+                        filiation_col = pole_col = None
 
                         for c in df.columns:
                             cl = c.lower()
@@ -856,18 +865,6 @@ class Api:
                                 annee_col = c
                             if (cl in ("h_f", "hf", "sexe")) and not hf_col:
                                 hf_col = c
-
-                        region_col = None
-                        district_col = None
-                        filieres_col = None
-                        categorisation_col = None
-                        variete_col = None
-                        opr_col = None
-                        filiation_col = None
-                        pole_col = None
-
-                        for c in df.columns:
-                            cl = c.lower()
                             if cl == "region":
                                 region_col = c
                             elif cl == "district":
@@ -885,89 +882,32 @@ class Api:
                             elif "pole" in cl or "podev" in cl:
                                 pole_col = c
 
+                        # --- Lecture ligne par ligne SANS dedoublonnage ---
                         for idx, row in df.iterrows():
-                            cin_val = str(row.get(cin_col, "") or "").strip().upper()
-                            cin_clean = re.sub(r"[^A-Z0-9]", "", cin_val)
+                            nom_val = norm(row.get(nom_col, "")) if nom_col else ""
 
-                            nom_val = str(row.get(nom_col, "") or "").strip().upper()
-                            commune_val = str(row.get(commune_col, "") or "").strip().upper()
-                            fkt_val = str(row.get(fkt_col, "") or "").strip().upper()
-                            annee_val = str(row.get(annee_col, "") or "").strip()
-                            hf_val = str(row.get(hf_col, "") or "").strip().upper()
-
-                            # Exclure les lignes sans nom_et_prenoms
-                            if not nom_val or nom_val in ("NON SPECIFIE", "NAN", "NONE", "NULL"):
+                            # Ignorer seulement les lignes sans nom
+                            if not nom_val:
                                 total_noms_vides_ignores += 1
                                 continue
 
-                            if not cin_clean and not commune_val and not fkt_val:
-                                continue
-
-                            if cin_clean and len(cin_clean) >= 3:
-                                key = f"CIN:{cin_clean}|{nom_val}|{commune_val}|{fkt_val}"
-                            else:
-                                key = f"NOCIN:{nom_val}|{commune_val}|{fkt_val}|{annee_val}|{hf_val}"
-
-                            if key in seen_keys:
-                                total_doublons_ignores += 1
-                                for person in all_persons:
-                                    if person.get("_key") == key:
-                                        def complete_field(field_name, value):
-                                            if value and (
-                                                not person.get(field_name)
-                                                or person.get(field_name) == "Non specifie"
-                                                or person.get(field_name) == "CIN non specifie"
-                                                or str(person.get(field_name)).upper()
-                                                in ("NAN", "NONE", "NULL")
-                                            ):
-                                                person[field_name] = value
-                                                return True
-                                            return False
-
-                                        if complete_field("cin", cin_val if cin_clean else ""):
-                                            total_fusions += 1
-                                        if complete_field("region", row.get(region_col, "")):
-                                            total_fusions += 1
-                                        if complete_field("district", row.get(district_col, "")):
-                                            total_fusions += 1
-                                        if complete_field("filieres", row.get(filieres_col, "")):
-                                            total_fusions += 1
-                                        if complete_field("h_f", hf_val):
-                                            total_fusions += 1
-                                        if complete_field("annee_de_naissance", annee_val):
-                                            total_fusions += 1
-                                        if complete_field("categorisation_eaf", row.get(categorisation_col, "")):
-                                            total_fusions += 1
-                                        if complete_field("variete", row.get(variete_col, "")):
-                                            total_fusions += 1
-                                        if complete_field("opr", row.get(opr_col, "")):
-                                            total_fusions += 1
-                                        if complete_field("filiation_menage", row.get(filiation_col, "")):
-                                            total_fusions += 1
-                                        if complete_field("pole_de_developpement", row.get(pole_col, "")):
-                                            total_fusions += 1
-                                        break
-                                continue
-
-                            seen_keys.add(key)
-
                             person = {
-                                "_key": key,
-                                "region": row.get(region_col, "") if region_col else "",
-                                "district": row.get(district_col, "") if district_col else "",
-                                "commune": row.get(commune_col, "") if commune_col else "",
-                                "fkt": row.get(fkt_col, "") if fkt_col else "",
-                                "nom_et_prenoms": row.get(nom_col, "") if nom_col else "",
-                                "h_f": hf_val,
-                                "filieres": row.get(filieres_col, "") if filieres_col else "",
-                                "cin": cin_val if cin_clean else "CIN non specifie",
-                                "annee_de_naissance": annee_val,
-                                "categorisation_eaf": row.get(categorisation_col, "") if categorisation_col else "",
-                                "variete": row.get(variete_col, "") if variete_col else "",
-                                "opr": row.get(opr_col, "") if opr_col else "",
-                                "filiation_menage": row.get(filiation_col, "") if filiation_col else "",
-                                "pole_de_developpement": row.get(pole_col, "") if pole_col else "",
-                                "observation": table,
+                                "source_table": table,
+                                "ligne_origine": int(row["__ligne_origine__"]),
+                                "region": norm(row.get(region_col, "")) if region_col else "",
+                                "district": norm(row.get(district_col, "")) if district_col else "",
+                                "commune": norm(row.get(commune_col, "")) if commune_col else "",
+                                "fkt": norm(row.get(fkt_col, "")) if fkt_col else "",
+                                "nom_et_prenoms": nom_val,
+                                "h_f": norm(row.get(hf_col, "")) if hf_col else "",
+                                "filieres": norm(row.get(filieres_col, "")) if filieres_col else "",
+                                "cin": norm(row.get(cin_col, "")) if cin_col else "",
+                                "annee_de_naissance": norm(row.get(annee_col, "")) if annee_col else "",
+                                "categorisation_eaf": norm(row.get(categorisation_col, "")) if categorisation_col else "",
+                                "variete": norm(row.get(variete_col, "")) if variete_col else "",
+                                "opr": norm(row.get(opr_col, "")) if opr_col else "",
+                                "filiation_menage": norm(row.get(filiation_col, "")) if filiation_col else "",
+                                "pole_de_developpement": norm(row.get(pole_col, "")) if pole_col else "",
                             }
 
                             all_persons.append(person)
@@ -979,13 +919,16 @@ class Api:
                 if not all_persons:
                     return {
                         "success": False,
-                        "message": "Aucune personne valide trouvee (toutes les lignes ont un nom vide ou sont des doublons).",
+                        "message": "Aucune personne valide trouvee.",
                     }
 
+                # --- Ecriture de la table listes_meres ---
                 cursor.execute('DROP TABLE IF EXISTS "listes_meres"')
                 cursor.execute('''
                     CREATE TABLE "listes_meres" (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        source_table TEXT,
+                        ligne_origine INTEGER,
                         region TEXT,
                         district TEXT,
                         commune TEXT,
@@ -999,17 +942,21 @@ class Api:
                         variete TEXT,
                         opr TEXT,
                         filiation_menage TEXT,
-                        pole_de_developpement TEXT,
-                        observation TEXT
+                        pole_de_developpement TEXT
                     )
                 ''')
 
                 for p in all_persons:
                     cursor.execute('''
                         INSERT INTO "listes_meres"
-                        (region, district, commune, fkt, nom_et_prenoms, h_f, filieres, cin, annee_de_naissance, categorisation_eaf, variete, opr, filiation_menage, pole_de_developpement, observation)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        (source_table, ligne_origine, region, district, commune,
+                         fkt, nom_et_prenoms, h_f, filieres, cin,
+                         annee_de_naissance, categorisation_eaf, variete, opr,
+                         filiation_menage, pole_de_developpement)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
+                        p.get("source_table", ""),
+                        p.get("ligne_origine", 0),
                         p.get("region", ""),
                         p.get("district", ""),
                         p.get("commune", ""),
@@ -1024,27 +971,28 @@ class Api:
                         p.get("opr", ""),
                         p.get("filiation_menage", ""),
                         p.get("pole_de_developpement", ""),
-                        p.get("observation", ""),
                     ))
 
                 conn.commit()
             finally:
                 self._safe_close_connection(conn)
 
+            S = len(all_persons)
+            N = total_lignes_lues
+
             return {
                 "success": True,
                 "message": (
-                    f"Liste mere creee avec {len(all_persons)} personne(s) distincte(s). "
-                    f"({total_lignes_lues} lignes lues, {total_doublons_ignores} doublons ignores, "
-                    f"{total_noms_vides_ignores} noms vides ignores, "
-                    f"{total_fusions} champs completes)"
+                    f"Liste mere creee avec {S} personne(s) (TOUTES les lignes brutes, "
+                    f"AUCUN dedoublonnage). "
+                    f"[{N} lignes lues, {total_noms_vides_ignores} noms vides ignores] "
+                    f"Utilisez maintenant l'outil 'Trouver les doublons' pour "
+                    f"identifier et supprimer manuellement les doublons CIN+NOM."
                 ),
-                "total_persons": len(all_persons),
+                "total_persons": S,
                 "tables_scanned": len(tables),
-                "total_lignes_lues": total_lignes_lues,
-                "total_doublons_ignores": total_doublons_ignores,
+                "total_lignes_lues": N,
                 "total_noms_vides_ignores": total_noms_vides_ignores,
-                "total_fusions": total_fusions,
             }
 
         except Exception as e:
@@ -1909,7 +1857,7 @@ class Api:
             self._safe_close_connection(conn)
 
     # ============================================================
-    # DOUBLONS
+    # DOUBLONS  (rowid robuste)
     # ============================================================
     def scan_table_duplicates_advanced(
         self, table_name: str, algorithm: str = "general", file_path: str = None
@@ -1934,7 +1882,10 @@ class Api:
                 if not cols_to_check:
                     cols_to_check = columns
 
-                df = pd.read_sql_query(f'SELECT rowid, * FROM "{table_name}"', conn)
+                df = pd.read_sql_query(
+                    f'SELECT rowid AS __sqlite_rowid__, * FROM "{table_name}"',
+                    conn,
+                )
 
                 if df.empty:
                     return {"success": True, "duplicates": []}
@@ -1964,8 +1915,8 @@ class Api:
                             ref_dict = self._convert_row_to_dict(ref_row, columns)
 
                             duplicates.append({
-                                "row_index": int(row["rowid"]),
-                                "reference_id": int(ref_row["rowid"]),
+                                "row_index": int(row["__sqlite_rowid__"]),
+                                "reference_id": int(ref_row["__sqlite_rowid__"]),
                                 "data": row_dict,
                                 "reference_data": ref_dict,
                                 "algorithm": "general",
@@ -1974,7 +1925,11 @@ class Api:
                 return {"success": True, "duplicates": duplicates, "algorithm": "general"}
 
             elif algorithm == "cin_nom":
-                df = pd.read_sql_query(f'SELECT rowid, * FROM "{table_name}"', conn)
+                # Lecture explicite du rowid avec alias unique
+                df = pd.read_sql_query(
+                    f'SELECT rowid AS __sqlite_rowid__, * FROM "{table_name}"',
+                    conn,
+                )
 
                 if df.empty:
                     return {"success": True, "duplicates": []}
@@ -2032,7 +1987,7 @@ class Api:
                 )
                 df["_fkt_clean"] = df[fkt_col].fillna("").astype(str).str.upper().str.strip()
 
-                df = df[(df["_cin_clean"] != "") | (df["_nom_clean"] != "")]
+                df = df[(df["_cin_clean"] != "") | (df["_nom_clean"] != "")].copy()
 
                 if df.empty:
                     return {"success": True, "duplicates": []}
@@ -2040,15 +1995,16 @@ class Api:
                 duplicates = []
                 processed = set()
 
+                # Construire rows_list en utilisant __sqlite_rowid__
                 rows_list = []
                 for idx, row in df.iterrows():
                     row_data = {
-                        "rowid": int(row["rowid"]),
+                        "rowid": int(row["__sqlite_rowid__"]),
                         "cin": row["_cin_clean"],
                         "nom": row["_nom_clean"],
                         "commune": row["_commune_clean"],
                         "fkt": row["_fkt_clean"],
-                        "data": {k: row[k] for k in columns},
+                        "data": {k: row[k] for k in columns if k in row.index},
                     }
                     rows_list.append(row_data)
 
@@ -2300,7 +2256,7 @@ class Api:
             db_filename = f"{safe_db_name}.db"
             db_path = data_dir / db_filename
 
-            # ✅ Fermer toute base ouverte AVANT l'import
+            # Fermer toute base ouverte AVANT l'import
             if self._active_db_path:
                 try:
                     self._database_service.close_database()
@@ -2369,7 +2325,7 @@ class Api:
             finally:
                 self._safe_close_connection(conn)
 
-            # ✅ Liberer les ressources avant d'ouvrir la nouvelle base
+            # Liberer les ressources avant d'ouvrir la nouvelle base
             self._release_resources(0.35)
 
             open_result = self.open_database(str(db_path))

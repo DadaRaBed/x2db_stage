@@ -5,10 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Data Manager - Expert Edition</title>
     <link rel="stylesheet" href="css/style.css" />
-    <link
-      rel="stylesheet"
-      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
-    />
+    <link rel="stylesheet" href="fontawesome/css/all.min.css" />
     <style>
       html,
       body {
@@ -647,6 +644,66 @@
       .btn-delete-table:hover {
         background: #c82333;
       }
+
+      /* Bouton precedent generique */
+      .btn-back-global {
+        background: #6c757d;
+        color: white;
+        border: none;
+        font-weight: 600;
+        padding: 0.5rem 1rem;
+        border-radius: 6px;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        transition: all 0.2s;
+      }
+      .btn-back-global:hover {
+        background: #5a6268;
+      }
+
+      /* Checkboxes tables doublons */
+      .dup-table-checkbox-label {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 12px;
+        background: #ffffff;
+        border: 2px solid var(--border-color, #cbd5e1);
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 0.85rem;
+        font-weight: 500;
+        color: var(--text-color, #1a1a2e);
+        transition: all 0.2s;
+        user-select: none;
+      }
+      .dup-table-checkbox-label:hover {
+        border-color: var(--primary, #4f46e5);
+        background: #eef2ff;
+      }
+      .dup-table-checkbox-label.checked {
+        border-color: var(--primary, #4f46e5);
+        background: #e0e7ff;
+        color: var(--primary, #4f46e5);
+        font-weight: 700;
+      }
+      .dup-table-checkbox-label input[type="checkbox"] {
+        width: 16px;
+        height: 16px;
+        cursor: pointer;
+        accent-color: var(--primary, #4f46e5);
+      }
+
+      /* Bouton TOUT SUPPRIMER */
+      .btn-delete-all-dups {
+        background: #8b0000 !important;
+        font-weight: 700 !important;
+      }
+      .btn-delete-all-dups:hover {
+        background: #a52a2a !important;
+      }
     </style>
   </head>
   <body>
@@ -920,6 +977,13 @@
           </div>
           <div class="topbar-right">
             <button
+              class="secondary-button btn-back-global"
+              type="button"
+              title="Retour a la page precedente"
+            >
+              <i class="fas fa-arrow-left"></i> Precedent
+            </button>
+            <button
               class="secondary-button btn-home"
               type="button"
               onclick="goToDashboard()"
@@ -1114,6 +1178,13 @@
           </div>
           <div class="topbar-right">
             <button
+              class="secondary-button btn-back-global"
+              type="button"
+              title="Retour a la page precedente"
+            >
+              <i class="fas fa-arrow-left"></i> Precedent
+            </button>
+            <button
               class="secondary-button btn-home"
               type="button"
               onclick="goToDashboard()"
@@ -1253,6 +1324,13 @@
             </div>
           </div>
           <div class="topbar-right">
+            <button
+              class="secondary-button btn-back-global"
+              type="button"
+              title="Retour a la page precedente"
+            >
+              <i class="fas fa-arrow-left"></i> Precedent
+            </button>
             <button
               class="secondary-button btn-home"
               type="button"
@@ -1549,18 +1627,18 @@
           </div>
           <div class="topbar-right">
             <button
+              class="secondary-button btn-back-global"
+              type="button"
+              title="Retour a la page precedente"
+            >
+              <i class="fas fa-arrow-left"></i> Precedent
+            </button>
+            <button
               class="secondary-button btn-home"
               type="button"
               onclick="goToDashboard()"
             >
               <i class="fas fa-home"></i> Accueil
-            </button>
-            <button
-              class="secondary-button"
-              type="button"
-              onclick="goToExistingDb()"
-            >
-              <i class="fas fa-arrow-left"></i> Retour
             </button>
             <button
               id="btn-terminate-database-duplicates"
@@ -1634,21 +1712,79 @@
               </label>
             </div>
 
-            <div class="table-filter-container">
-              <label for="dup-table-filter">
-                <i class="fas fa-filter"></i> Filtrer par table :
-              </label>
-              <select id="dup-table-filter">
-                <option value="">-- Toutes les tables --</option>
-              </select>
-              <button
-                id="btn-refresh-tables"
-                class="secondary-button"
-                type="button"
-                style="padding: 0.4rem 0.8rem; font-size: 0.8rem"
+            <div
+              class="table-filter-container"
+              style="flex-direction: column; align-items: stretch; gap: 12px"
+            >
+              <div
+                style="
+                  display: flex;
+                  justify-content: space-between;
+                  align-items: center;
+                  flex-wrap: wrap;
+                  gap: 10px;
+                "
               >
-                <i class="fas fa-sync-alt"></i> Actualiser les tables
-              </button>
+                <label style="font-weight: 600">
+                  <i class="fas fa-table"></i> Tables a analyser :
+                </label>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap">
+                  <button
+                    id="btn-check-all-tables"
+                    class="secondary-button"
+                    type="button"
+                    style="padding: 0.35rem 0.8rem; font-size: 0.8rem"
+                  >
+                    <i class="fas fa-check-double"></i> Tout cocher
+                  </button>
+                  <button
+                    id="btn-uncheck-all-tables"
+                    class="secondary-button"
+                    type="button"
+                    style="padding: 0.35rem 0.8rem; font-size: 0.8rem"
+                  >
+                    <i class="fas fa-times"></i> Tout decocher
+                  </button>
+                  <button
+                    id="btn-refresh-tables"
+                    class="secondary-button"
+                    type="button"
+                    style="
+                      padding: 0.35rem 0.8rem;
+                      font-size: 0.8rem;
+                      background: #17a2b8;
+                      color: white;
+                      border: none;
+                    "
+                  >
+                    <i class="fas fa-sync-alt"></i> Actualiser
+                  </button>
+                </div>
+              </div>
+              <div
+                id="dup-tables-checkboxes"
+                style="
+                  display: flex;
+                  flex-wrap: wrap;
+                  gap: 8px;
+                  max-height: 200px;
+                  overflow-y: auto;
+                  padding: 10px;
+                  background: var(--bg-secondary, #f8fafc);
+                  border-radius: 6px;
+                  border: 1px solid var(--border-color, #e2e8f0);
+                "
+              >
+                <span style="color: #999; font-style: italic"
+                  >Chargement...</span
+                >
+              </div>
+              <div
+                id="dup-tables-info"
+                style="font-size: 0.85rem; color: var(--text-muted, #64748b)"
+              >
+                0 table(s) selectionnee(s)
+              </div>
             </div>
 
             <div
@@ -1657,6 +1793,7 @@
                 gap: 10px;
                 flex-wrap: wrap;
                 align-items: center;
+                margin-top: 1rem;
               "
             >
               <button
@@ -1830,7 +1967,25 @@
                     cursor: pointer;
                   "
                 >
-                  <i class="fas fa-trash"></i> Supprimer
+                  <i class="fas fa-trash"></i> Supprimer selection
+                </button>
+                <button
+                  id="btn-delete-all-dups"
+                  class="button button-primary btn-delete-all-dups"
+                  type="button"
+                  style="
+                    background: #8b0000;
+                    padding: 0.4rem 0.8rem;
+                    font-size: 0.8rem;
+                    border: none;
+                    color: white;
+                    border-radius: 4px;
+                    cursor: pointer;
+                    font-weight: 700;
+                  "
+                  title="Supprime TOUS les doublons trouves (pas seulement ceux affiches)"
+                >
+                  <i class="fas fa-bomb"></i> TOUT SUPPRIMER
                 </button>
                 <button
                   id="btn-export-dups"
@@ -1875,6 +2030,13 @@
             </div>
           </div>
           <div class="topbar-right">
+            <button
+              class="secondary-button btn-back-global"
+              type="button"
+              title="Retour a la page precedente"
+            >
+              <i class="fas fa-arrow-left"></i> Precedent
+            </button>
             <button
               class="secondary-button btn-home"
               type="button"
