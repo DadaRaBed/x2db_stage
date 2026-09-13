@@ -44,6 +44,8 @@ class DuplicatesApi:
                 return self._scan_cin_nom(conn, table_name, columns)
             elif algorithm == "cin_nom_only":
                 return self._scan_cin_nom_only(conn, table_name, columns)
+            elif algorithm == "cin_nom_annee_commune_fkt":
+                return self._scan_cin_nom_annee_commune_fkt(conn, table_name, columns)
             else:
                 return {"success": True, "duplicates": []}
         except Exception as e:
@@ -94,8 +96,140 @@ class DuplicatesApi:
     # ============================================================
     # ALGO 2 : CIN + NOM + COMMUNE + FKT
     # ============================================================
-        # ============================================================
-    # ALGO 3 : CIN + NOM + ANNEE DE NAISSANCE (nouveau)
+    def _scan_cin_nom(self, conn, table_name, columns):
+        """
+        Detecte les doublons sur 4 criteres :
+        CIN + NOM + COMMUNE + FKT
+
+        Tous les 4 champs doivent etre remplis et identiques.
+        """
+        df = pd.read_sql_query(
+            f'SELECT rowid AS __sqlite_rowid__, * FROM "{table_name}"', conn,
+        )
+        if df.empty:
+            return {"success": True, "duplicates": [], "algorithm": "cin_nom"}
+
+        # --- Detection des colonnes ---
+        cin_col = None
+        nom_col = None
+        commune_col = None
+        fkt_col = None
+
+        cin_patterns = ["cin", "nin", "nif", "id_personne", "num", "numero", "matricule"]
+        nom_patterns = ["nom", "name", "prenom", "firstname", "lastname", "fullname", "raison"]
+        commune_patterns = ["commune", "comm", "ville", "city"]
+        fkt_patterns = ["fkt", "fokontany", "localite", "lieu", "village"]
+
+        for col in columns:
+            cl = col.lower()
+            if not cin_col and any(p in cl for p in cin_patterns):
+                cin_col = col
+            if not nom_col and any(p in cl for p in nom_patterns):
+                nom_col = col
+            if not commune_col and any(p in cl for p in commune_patterns):
+                commune_col = col
+            if not fkt_col and any(p in cl for p in fkt_patterns):
+                fkt_col = col
+
+        # --- Verifications ---
+        if not cin_col or not nom_col:
+            return {
+                "success": True,
+                "duplicates": [],
+                "algorithm": "cin_nom",
+                "message": "Colonnes CIN ou NOM non trouvees",
+            }
+
+        if not commune_col:
+            return {
+                "success": True,
+                "duplicates": [],
+                "algorithm": "cin_nom",
+                "message": "Colonne COMMUNE non trouvee",
+            }
+
+        if not fkt_col:
+            return {
+                "success": True,
+                "duplicates": [],
+                "algorithm": "cin_nom",
+                "message": "Colonne FKT non trouvee",
+            }
+
+        # --- Nettoyage ---
+        df["_cin_clean"] = df[cin_col].fillna("").astype(str).str.upper().str.strip()
+        df["_cin_clean"] = df["_cin_clean"].str.replace(r"[^A-Z0-9]", "", regex=True)
+        df["_nom_clean"] = df[nom_col].fillna("").astype(str).str.upper().str.strip()
+        df["_commune_clean"] = df[commune_col].fillna("").astype(str).str.upper().str.strip()
+        df["_fkt_clean"] = df[fkt_col].fillna("").astype(str).str.upper().str.strip()
+
+        df = df[(df["_cin_clean"] != "") | (df["_nom_clean"] != "")].copy()
+        if df.empty:
+            return {"success": True, "duplicates": [], "algorithm": "cin_nom"}
+
+        # --- Construire les lignes ---
+        rows_list = []
+        for idx, row in df.iterrows():
+            rows_list.append({
+                "rowid": int(row["__sqlite_rowid__"]),
+                "cin": row["_cin_clean"],
+                "nom": row["_nom_clean"],
+                "commune": row["_commune_clean"],
+                "fkt": row["_fkt_clean"],
+                "data": {k: row[k] for k in columns if k in row.index},
+            })
+
+        # --- Groupement par (CIN, NOM, COMMUNE, FKT) ---
+        composite_groups = {}
+        for row in rows_list:
+            if (row["cin"] and len(row["cin"]) >= 3 and row["nom"]
+                    and row["commune"] and row["fkt"]):
+                key = f"{row['cin']}|{row['nom']}|{row['commune']}|{row['fkt']}"
+                composite_groups.setdefault(key, []).append(row)
+
+        # --- Construction des doublons ---
+        duplicates = []
+        processed = set()
+
+        for composite_key, group in composite_groups.items():
+            if len(group) <= 1:
+                continue
+
+            ref_row = group[0]
+            ref_id = ref_row["rowid"]
+            parts = composite_key.split("|")
+
+            for row in group[1:]:
+                if row["rowid"] in processed:
+                    continue
+                duplicates.append({
+                    "row_index": row["rowid"],
+                    "reference_id": ref_id,
+                    "data": row["data"],
+                    "reference_data": ref_row["data"],
+                    "algorithm": "cin_nom_complet",
+                    "cin_col": cin_col,
+                    "nom_col": nom_col,
+                    "commune_col": commune_col,
+                    "fkt_col": fkt_col,
+                    "cin_value": row["cin"],
+                    "nom_value": row["nom"],
+                    "commune_value": row["commune"],
+                    "fkt_value": row["fkt"],
+                    "context": {
+                        "type": "CIN_NOM_COMMUNE_FKT",
+                        "cin": parts[0] if len(parts) > 0 else "",
+                        "nom": parts[1] if len(parts) > 1 else "",
+                        "commune": parts[2] if len(parts) > 2 else "",
+                        "fkt": parts[3] if len(parts) > 3 else "",
+                    },
+                })
+                processed.add(row["rowid"])
+
+        return {"success": True, "duplicates": duplicates, "algorithm": "cin_nom"}
+
+    # ============================================================
+    # ALGO 3 : CIN + NOM + ANNEE DE NAISSANCE
     # ============================================================
     def _scan_cin_nom_only(self, conn, table_name, columns):
         """
@@ -120,24 +254,19 @@ class DuplicatesApi:
 
         cin_patterns = ["cin", "nin", "nif", "id_personne", "num", "numero", "matricule"]
         nom_patterns = ["nom", "name", "prenom", "firstname", "lastname", "fullname", "raison"]
-        annee_patterns = ["annee", "année", "naissance", "birth", "date_naiss", "date_naissance", "annee_naiss", "annee_de_naissance"]
+        annee_patterns = ["annee", "année", "naissance", "birth", "date_naiss", "date_naissance", "annee_naiss"]
 
         for col in columns:
             cl = col.lower()
 
-            # CIN
             if not cin_col and any(p in cl for p in cin_patterns):
                 cin_col = col
-
-            # NOM
             if not nom_col and any(p in cl for p in nom_patterns):
                 nom_col = col
-
-            # Annee de naissance (contient "annee" OU "naissance" OU "birth")
             if not annee_col and any(p in cl for p in annee_patterns):
                 annee_col = col
 
-        # Verification des colonnes obligatoires
+        # --- Verification des colonnes obligatoires ---
         if not cin_col:
             return {
                 "success": True,
@@ -162,7 +291,7 @@ class DuplicatesApi:
                 "message": "Colonne ANNEE DE NAISSANCE non trouvee",
             }
 
-        # --- Nettoyage des valeurs ---
+        # --- Nettoyage ---
         df["_cin_clean"] = df[cin_col].fillna("").astype(str).str.upper().str.strip()
         df["_cin_clean"] = df["_cin_clean"].str.replace(r"[^A-Z0-9]", "", regex=True)
         df["_nom_clean"] = df[nom_col].fillna("").astype(str).str.upper().str.strip()
@@ -171,17 +300,14 @@ class DuplicatesApi:
         def normalize_annee(val):
             if val is None or pd.isna(val):
                 return ""
-            s = str(val).strip()
-            # Extraire 4 chiffres consecutifs
             import re as _re
+            s = str(val).strip()
             match = _re.search(r"\d{4}", s)
             if match:
-                annee = match.group(0)
-                # Verifier plage realiste
                 try:
-                    y = int(annee)
+                    y = int(match.group(0))
                     if 1900 <= y <= 2100:
-                        return annee
+                        return match.group(0)
                 except Exception:
                     pass
             return ""
@@ -189,7 +315,6 @@ class DuplicatesApi:
         df["_annee_clean"] = df[annee_col].apply(normalize_annee)
 
         # --- Filtrer les lignes valides ---
-        # CIN rempli (>= 3 car.) ET NOM rempli ET ANNEE remplie
         df = df[
             (df["_cin_clean"] != "") &
             (df["_cin_clean"].str.len() >= 3) &
@@ -253,28 +378,36 @@ class DuplicatesApi:
                 })
                 processed.add(row["rowid"])
 
-        return {"success": True, "duplicates": duplicates, "algorithm": "cin_nom_only"}    # ============================================================
-    # ALGO 3 : CIN + NOM UNIQUEMENT (NOUVEAU)
-    # ============================================================
-    def _scan_cin_nom_only(self, conn, table_name, columns):
-        """
-        Detecte les doublons sur la base du CIN + NOM uniquement.
+        return {"success": True, "duplicates": duplicates, "algorithm": "cin_nom_only"}
 
-        Regles :
-        - Si le CIN est rempli (>= 3 caracteres) : cle = CIN + NOM
-        - Si le CIN est vide : la ligne est ignoree (pas de comparaison fiable)
+    # ============================================================
+    # ALGO 4 : CIN + NOM + ANNEE + COMMUNE + FKT (strict)
+    # ============================================================
+    def _scan_cin_nom_annee_commune_fkt(self, conn, table_name, columns):
+        """
+        Detecte les doublons stricts sur 5 criteres :
+        CIN + NOM + ANNEE DE NAISSANCE + COMMUNE + FKT
+
+        Tous les 5 champs doivent etre remplis et identiques.
         """
         df = pd.read_sql_query(
             f'SELECT rowid AS __sqlite_rowid__, * FROM "{table_name}"', conn,
         )
         if df.empty:
-            return {"success": True, "duplicates": [], "algorithm": "cin_nom_only"}
+            return {"success": True, "duplicates": [], "algorithm": "cin_nom_annee_commune_fkt"}
 
         # --- Detection des colonnes ---
         cin_col = None
         nom_col = None
+        commune_col = None
+        fkt_col = None
+        annee_col = None
+
         cin_patterns = ["cin", "nin", "nif", "id_personne", "num", "numero", "matricule"]
         nom_patterns = ["nom", "name", "prenom", "firstname", "lastname", "fullname", "raison"]
+        commune_patterns = ["commune", "comm", "ville", "city"]
+        fkt_patterns = ["fkt", "fokontany", "localite", "lieu", "village"]
+        annee_patterns = ["annee", "année", "naissance", "birth", "date_naiss", "date_naissance"]
 
         for col in columns:
             cl = col.lower()
@@ -282,29 +415,56 @@ class DuplicatesApi:
                 cin_col = col
             if not nom_col and any(p in cl for p in nom_patterns):
                 nom_col = col
+            if not commune_col and any(p in cl for p in commune_patterns):
+                commune_col = col
+            if not fkt_col and any(p in cl for p in fkt_patterns):
+                fkt_col = col
+            if not annee_col and any(p in cl for p in annee_patterns):
+                annee_col = col
 
-        if not cin_col or not nom_col:
+        if not all([cin_col, nom_col, commune_col, fkt_col, annee_col]):
             return {
                 "success": True,
                 "duplicates": [],
-                "algorithm": "cin_nom_only",
-                "message": "Colonnes CIN ou NOM non trouvees",
+                "algorithm": "cin_nom_annee_commune_fkt",
+                "message": "Certaines colonnes sont manquantes (CIN, NOM, COMMUNE, FKT, ANNEE)",
             }
 
         # --- Nettoyage ---
         df["_cin_clean"] = df[cin_col].fillna("").astype(str).str.upper().str.strip()
         df["_cin_clean"] = df["_cin_clean"].str.replace(r"[^A-Z0-9]", "", regex=True)
         df["_nom_clean"] = df[nom_col].fillna("").astype(str).str.upper().str.strip()
+        df["_commune_clean"] = df[commune_col].fillna("").astype(str).str.upper().str.strip()
+        df["_fkt_clean"] = df[fkt_col].fillna("").astype(str).str.upper().str.strip()
 
-        # Garder uniquement les lignes avec CIN rempli ET NOM rempli
+        def normalize_annee(val):
+            if val is None or pd.isna(val):
+                return ""
+            import re as _re
+            match = _re.search(r"\d{4}", str(val))
+            if match:
+                try:
+                    y = int(match.group(0))
+                    if 1900 <= y <= 2100:
+                        return match.group(0)
+                except Exception:
+                    pass
+            return ""
+
+        df["_annee_clean"] = df[annee_col].apply(normalize_annee)
+
+        # --- Filtrer : tous les 5 champs remplis ---
         df = df[
             (df["_cin_clean"] != "") &
             (df["_cin_clean"].str.len() >= 3) &
-            (df["_nom_clean"] != "")
+            (df["_nom_clean"] != "") &
+            (df["_commune_clean"] != "") &
+            (df["_fkt_clean"] != "") &
+            (df["_annee_clean"] != "")
         ].copy()
 
         if df.empty:
-            return {"success": True, "duplicates": [], "algorithm": "cin_nom_only"}
+            return {"success": True, "duplicates": [], "algorithm": "cin_nom_annee_commune_fkt"}
 
         # --- Construire les lignes ---
         rows_list = []
@@ -313,23 +473,24 @@ class DuplicatesApi:
                 "rowid": int(row["__sqlite_rowid__"]),
                 "cin": row["_cin_clean"],
                 "nom": row["_nom_clean"],
+                "commune": row["_commune_clean"],
+                "fkt": row["_fkt_clean"],
+                "annee": row["_annee_clean"],
                 "data": {k: row[k] for k in columns if k in row.index},
             })
 
-        # --- Groupement par (CIN, NOM) ---
+        # --- Grouper par cle 5 champs ---
         groups = {}
         for row in rows_list:
-            key = f"{row['cin']}|{row['nom']}"
+            key = f"{row['cin']}|{row['nom']}|{row['annee']}|{row['commune']}|{row['fkt']}"
             groups.setdefault(key, []).append(row)
 
-        # --- Construction des doublons ---
         duplicates = []
         processed = set()
 
         for composite_key, group in groups.items():
             if len(group) <= 1:
                 continue
-
             ref_row = group[0]
             ref_id = ref_row["rowid"]
             parts = composite_key.split("|")
@@ -342,20 +503,24 @@ class DuplicatesApi:
                     "reference_id": ref_id,
                     "data": row["data"],
                     "reference_data": ref_row["data"],
-                    "algorithm": "cin_nom_only",
+                    "algorithm": "cin_nom_annee_commune_fkt",
                     "cin_col": cin_col,
                     "nom_col": nom_col,
-                    "cin_value": row["cin"],
-                    "nom_value": row["nom"],
+                    "commune_col": commune_col,
+                    "fkt_col": fkt_col,
+                    "annee_col": annee_col,
                     "context": {
-                        "type": "CIN_NOM",
+                        "type": "CIN_NOM_ANNEE_COMMUNE_FKT",
                         "cin": parts[0] if len(parts) > 0 else "",
                         "nom": parts[1] if len(parts) > 1 else "",
+                        "annee": parts[2] if len(parts) > 2 else "",
+                        "commune": parts[3] if len(parts) > 3 else "",
+                        "fkt": parts[4] if len(parts) > 4 else "",
                     },
                 })
                 processed.add(row["rowid"])
 
-        return {"success": True, "duplicates": duplicates, "algorithm": "cin_nom_only"}
+        return {"success": True, "duplicates": duplicates, "algorithm": "cin_nom_annee_commune_fkt"}
 
     # ============================================================
     # CONVERSION

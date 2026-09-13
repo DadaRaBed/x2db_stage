@@ -3,6 +3,7 @@
 // ============================================
 const setupView = document.querySelector("#setup-view");
 const loginView = document.querySelector("#login-view");
+const forgotPasswordView = document.querySelector("#forgot-password-view");
 const dashboardView = document.querySelector("#dashboard-view");
 const excelImportView = document.querySelector("#excel-import-view");
 const existingDbView = document.querySelector("#existing-db-view");
@@ -51,6 +52,13 @@ let currentLoggedInUser = null;
 let currentDbPath = null;
 let isDbOpen = false;
 
+let forgotPasswordState = {
+  step: 1,
+  userId: null,
+  pseudo: null,
+  email: null,
+};
+
 let allDuplicates = [];
 let currentDuplicatesAlgo = "general";
 let selectedDuplicateTables = [];
@@ -61,6 +69,12 @@ let currentManipulateData = [];
 let currentManipulateFiltered = [];
 let currentManipulateTotalCount = 0;
 let manipulateShowResults = true;
+
+// ✅ PAGINATION : une seule declaration
+let currentManipulatePage = 1;
+const MANIPULATE_PER_PAGE = 1000;
+let currentDuplicatePage = 1;
+const DUPLICATE_PER_PAGE = 1000;
 
 let createDbExcelPath = "";
 let createDbExcelSheets = [];
@@ -138,7 +152,10 @@ function goBack() {
       setTimeout(() => {
         loadManipulateTables().then(() => {
           if (currentManipulateTable) {
-            loadManipulateTableData(currentManipulateTable);
+            loadManipulateTableData(
+              currentManipulateTable,
+              currentManipulatePage,
+            );
           }
         });
       }, 200);
@@ -156,7 +173,9 @@ function goBack() {
 
 function showView(viewElement) {
   const allViews = document.querySelectorAll(
-    "#setup-view, #login-view, #dashboard-view, #excel-import-view, #existing-db-view, #duplicates-view, #manipulate-view, #create-db-view",
+    "#setup-view, #login-view, #forgot-password-view, #dashboard-view, " +
+      "#excel-import-view, #existing-db-view, #duplicates-view, " +
+      "#manipulate-view, #create-db-view",
   );
   allViews.forEach((view) => {
     if (view) {
@@ -169,7 +188,6 @@ function showView(viewElement) {
     viewElement.style.display = "block";
   }
 }
-
 function showMessage(selector, message, success = false) {
   const element = document.querySelector(selector);
   if (!element) return;
@@ -360,11 +378,24 @@ function updateTerminateButtonVisibility() {
 // ============================================
 // GESTION DE LA SESSION
 // ============================================
-function showDashboard(user) {
+async function showDashboard(user) {
   if (!user) {
     showView(loginView);
     return;
   }
+
+  // Verifier l'acceptation des CGU
+  try {
+    await waitForApi();
+    const cguStatus = await window.pywebview.api.get_cgu_status();
+    if (cguStatus && cguStatus.success && !cguStatus.accepted) {
+      window.location.href = "cgu.html";
+      return;
+    }
+  } catch (e) {
+    console.error("Erreur verification CGU:", e);
+  }
+
   currentLoggedInUser = user;
   window.lastLoggedInUser = user;
   sessionStorage.setItem("session_active", "true");
@@ -392,7 +423,6 @@ function showDashboard(user) {
   loadUserActivities();
   updateFooterVersion();
 }
-
 function goToDashboard() {
   saveCurrentDbState();
   navigationHistory = ["dashboard"];
@@ -430,6 +460,7 @@ function resetDuplicateView() {
   allDuplicates = [];
   currentColumns = [];
   selectedDuplicateTables = [];
+  currentDuplicatePage = 1;
 
   const resultsContainer = document.getElementById("dup-results-container");
   if (resultsContainer) resultsContainer.classList.add("hidden");
@@ -441,6 +472,256 @@ function resetDuplicateView() {
   if (statusDiv)
     statusDiv.textContent =
       'Selectionnez un algorithme et cliquez sur "Lancer l\'analyse"';
+}
+
+// ============================================
+// MOT DE PASSE OUBLIE
+// ============================================
+function resetForgotPasswordUI() {
+  forgotPasswordState = { step: 1, userId: null, pseudo: null, email: null };
+
+  // Supprimer l'encadre du code s'il existe
+  document.getElementById("validation-code-box")?.remove();
+
+  const s1 = document.getElementById("forgot-step-email");
+  const s2 = document.getElementById("forgot-step-code");
+  const s3 = document.getElementById("forgot-step-password");
+  if (s1) s1.classList.remove("hidden");
+  if (s2) s2.classList.add("hidden");
+  if (s3) s3.classList.add("hidden");
+
+  const emailInput = document.getElementById("forgot-email-input");
+  const codeInput = document.getElementById("forgot-code-input");
+  const pwdInput = document.getElementById("forgot-new-password");
+  const pwdConfirm = document.getElementById("forgot-confirm-password");
+  if (emailInput) emailInput.value = "";
+  if (codeInput) codeInput.value = "";
+  if (pwdInput) pwdInput.value = "";
+  if (pwdConfirm) pwdConfirm.value = "";
+
+  const title = document.getElementById("forgot-title");
+  const subtitle = document.getElementById("forgot-subtitle");
+  if (title) title.textContent = "Mot de passe oublie";
+  if (subtitle)
+    subtitle.textContent =
+      "Saisissez votre email pour recevoir un code de validation.";
+
+  showMessage("#forgot-message", "");
+}
+
+function showForgotPasswordView() {
+  resetForgotPasswordUI();
+  showView(forgotPasswordView);
+  setTimeout(() => {
+    document.getElementById("forgot-email-input")?.focus();
+  }, 100);
+}
+
+function cancelForgotPassword() {
+  resetForgotPasswordUI();
+  showView(loginView);
+}
+
+function showValidationCodeBox(code) {
+  document.getElementById("validation-code-box")?.remove();
+
+  const box = document.createElement("div");
+  box.id = "validation-code-box";
+  box.style.cssText = `
+    background: #fff3cd;
+    border: 2px dashed #f39c12;
+    border-radius: 8px;
+    padding: 16px;
+    margin: 16px 0;
+    text-align: center;
+  `;
+  box.innerHTML = `
+    <div style="font-size: 0.85rem; color: #856404; margin-bottom: 8px; font-weight: 600;">
+      <i class="fas fa-key"></i> VOTRE CODE DE VALIDATION
+    </div>
+    <div style="
+      font-family: 'Courier New', monospace;
+      font-size: 1.8rem;
+      font-weight: bold;
+      color: #856404;
+      letter-spacing: 3px;
+      padding: 10px;
+      background: #ffffff;
+      border-radius: 6px;
+      user-select: all;
+      cursor: text;
+    ">${code}</div>
+    <button type="button" id="copy-code-btn" style="
+      margin-top: 10px;
+      padding: 6px 14px;
+      background: #f39c12;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      font-weight: 600;
+    ">
+      <i class="fas fa-copy"></i> Copier le code
+    </button>
+    <div style="font-size: 0.75rem; color: #856404; margin-top: 8px; font-style: italic;">
+      Notez ce code. Il ne sera plus affiche apres cette etape.
+    </div>
+  `;
+
+  const codeForm = document.getElementById("forgot-code-form");
+  if (codeForm) {
+    codeForm.parentNode.insertBefore(box, codeForm);
+  }
+
+  document
+    .getElementById("copy-code-btn")
+    ?.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(code);
+        showNotification("Code copie dans le presse-papiers.", true);
+      } catch (e) {
+        showNotification(
+          "Impossible de copier. Selectionnez manuellement.",
+          false,
+        );
+      }
+    });
+}
+
+async function handleForgotEmailSubmit(e) {
+  e.preventDefault();
+  const email = document.getElementById("forgot-email-input")?.value.trim();
+  if (!email) {
+    showMessage("#forgot-message", "Veuillez saisir votre email.");
+    return;
+  }
+  try {
+    await waitForApi();
+    const result = await window.pywebview.api.request_password_reset(email);
+    if (!result || !result.success) {
+      showMessage("#forgot-message", result?.message || "Erreur.");
+      return;
+    }
+
+    forgotPasswordState.step = 2;
+    forgotPasswordState.userId = result.user_id;
+    forgotPasswordState.pseudo = result.pseudo;
+    forgotPasswordState.email = email;
+
+    document.getElementById("forgot-step-email")?.classList.add("hidden");
+    document.getElementById("forgot-step-code")?.classList.remove("hidden");
+
+    const title = document.getElementById("forgot-title");
+    const subtitle = document.getElementById("forgot-subtitle");
+    const userName = document.getElementById("forgot-user-name");
+    if (title) title.textContent = "Code de validation";
+    if (subtitle)
+      subtitle.textContent =
+        "Notez ce code soigneusement, il ne sera plus affiche.";
+    if (userName) userName.textContent = `Utilisateur : ${result.pseudo}`;
+
+    // Afficher le code dans un encadre bien visible
+    showValidationCodeBox(result.code);
+
+    showMessage("#forgot-message", "Email verifie. Code genere.", true);
+    setTimeout(() => {
+      document.getElementById("forgot-code-input")?.focus();
+    }, 100);
+  } catch (err) {
+    console.error(err);
+    showMessage("#forgot-message", "Erreur de communication.");
+  }
+}
+
+async function handleForgotCodeSubmit(e) {
+  e.preventDefault();
+  const code = document.getElementById("forgot-code-input")?.value.trim();
+  if (!code) {
+    showMessage("#forgot-message", "Veuillez saisir le code recu.");
+    return;
+  }
+  try {
+    await waitForApi();
+    const result = await window.pywebview.api.verify_reset_code(
+      forgotPasswordState.userId,
+      code,
+    );
+    if (!result || !result.success) {
+      showMessage("#forgot-message", result?.message || "Code incorrect.");
+      return;
+    }
+    forgotPasswordState.step = 3;
+    document.getElementById("forgot-step-code")?.classList.add("hidden");
+    document.getElementById("forgot-step-password")?.classList.remove("hidden");
+
+    // Supprimer l'encadre du code (l'utilisateur l'a note)
+    document.getElementById("validation-code-box")?.remove();
+
+    const title = document.getElementById("forgot-title");
+    const subtitle = document.getElementById("forgot-subtitle");
+    const userName2 = document.getElementById("forgot-user-name-2");
+    if (title) title.textContent = "Nouveau mot de passe";
+    if (subtitle) subtitle.textContent = "Choisissez un nouveau mot de passe.";
+    if (userName2)
+      userName2.textContent = `Utilisateur : ${forgotPasswordState.pseudo}`;
+
+    showMessage("#forgot-message", result.message, true);
+    setTimeout(() => {
+      document.getElementById("forgot-new-password")?.focus();
+    }, 100);
+  } catch (err) {
+    console.error(err);
+    showMessage("#forgot-message", "Erreur de communication.");
+  }
+}
+
+async function handleForgotPasswordSubmit(e) {
+  e.preventDefault();
+  const pwd = document.getElementById("forgot-new-password")?.value || "";
+  const confirm =
+    document.getElementById("forgot-confirm-password")?.value || "";
+
+  if (pwd.length < 6) {
+    showMessage(
+      "#forgot-message",
+      "Le mot de passe doit contenir au moins 6 caracteres.",
+    );
+    return;
+  }
+  if (pwd !== confirm) {
+    showMessage("#forgot-message", "Les mots de passe ne correspondent pas.");
+    return;
+  }
+  try {
+    await waitForApi();
+    const code = document.getElementById("forgot-code-input")?.value.trim();
+    const result = await window.pywebview.api.confirm_password_reset(
+      forgotPasswordState.userId,
+      code,
+      pwd,
+    );
+    if (!result || !result.success) {
+      showMessage("#forgot-message", result?.message || "Erreur.");
+      return;
+    }
+    showMessage(
+      "#forgot-message",
+      "Mot de passe reinitialise ! Redirection...",
+      true,
+    );
+    setTimeout(() => {
+      cancelForgotPassword();
+      showMessage(
+        "#login-message",
+        "Vous pouvez maintenant vous connecter.",
+        true,
+      );
+    }, 1500);
+  } catch (err) {
+    console.error(err);
+    showMessage("#forgot-message", "Erreur de communication.");
+  }
 }
 
 // ============================================
@@ -552,6 +833,7 @@ async function deleteSelectedTable(tableName) {
         currentManipulateTable = "";
         currentManipulateData = [];
         currentManipulateFiltered = [];
+        currentManipulatePage = 1;
         const container = document.querySelector(
           "#manipulate-results-table-container",
         );
@@ -602,6 +884,11 @@ async function terminateDatabase() {
     if (result && result.success) {
       isDbOpen = false;
       currentDbPath = null;
+      currentManipulateTable = "";
+      currentManipulateData = [];
+      currentManipulateFiltered = [];
+      currentManipulatePage = 1;
+
       const label = document.getElementById("selected-db-path-label");
       if (label) {
         label.textContent = "Aucune base selectionnee";
@@ -658,6 +945,10 @@ async function logoutUser() {
       window.lastLoggedInUser = null;
       isDbOpen = false;
       navigationHistory = [];
+      currentManipulateTable = "";
+      currentManipulateData = [];
+      currentManipulateFiltered = [];
+      currentManipulatePage = 1;
 
       document
         .querySelectorAll(".user-menu")
@@ -1415,6 +1706,12 @@ async function openSelectedDatabase() {
     const result = await window.pywebview.api.open_database_path(filePath);
     if (result && result.success) {
       isDbOpen = true;
+      currentDbPath = filePath;
+
+      // ✅ SAUVEGARDER le chemin dans sessionStorage (crucial pour l'export)
+      sessionStorage.setItem("current_db_path", filePath);
+      console.log("[DB] Base ouverte, chemin sauvegarde :", filePath);
+
       const fileName = filePath.split("/").pop().split("\\").pop();
       const label = document.getElementById("selected-db-path-label");
       if (label) {
@@ -1688,7 +1985,7 @@ function openEditModal(tableName, rowId, rowData, isNew = false) {
             logUserAction(`Ajout d'une ligne dans ${tableName}`);
             closeModal();
             if (currentManipulateTable === tableName) {
-              await loadManipulateTableData(tableName);
+              await loadManipulateTableData(tableName, currentManipulatePage);
             }
           } else {
             showNotification(res?.message || "Erreur lors de l'ajout.", false);
@@ -1749,7 +2046,7 @@ function openEditModal(tableName, rowId, rowData, isNew = false) {
               renderDuplicatesWithFilter();
             }
             if (currentManipulateTable === tableName) {
-              await loadManipulateTableData(tableName);
+              await loadManipulateTableData(tableName, currentManipulatePage);
             }
             closeModal();
           } else {
@@ -2022,11 +2319,19 @@ async function runDuplicateScan(selectedAlgo) {
     return;
   }
 
+  const algoLabel =
+    {
+      general: "General (toutes les colonnes)",
+      cin_nom: "CIN + NOM + COMMUNE + FKT",
+      cin_nom_only: "CIN + NOM + ANNEE NAISSANCE",
+      cin_nom_annee_commune_fkt: "CIN + NOM + ANNEE + COMMUNE + FKT (strict)",
+    }[selectedAlgo] || selectedAlgo;
+
   resultsContainer.classList.remove("hidden");
   toolbar.classList.remove("hidden");
   resultsBody.innerHTML =
     '<p style="color: var(--text-muted, #64748b);">Analyse en cours...</p>';
-  statusDiv.textContent = `Analyse avec l'algorithme "${selectedAlgo === "general" ? "General" : "CIN + NOM + COMMUNE + FKT"}" sur ${checkedTables.length} table(s)...`;
+  statusDiv.textContent = `Analyse avec l'algorithme "${algoLabel}" sur ${checkedTables.length} table(s)...`;
   duplicateScanCancelled = false;
   if (cancelBtn) cancelBtn.style.display = "inline-block";
   if (runBtn) runBtn.disabled = true;
@@ -2049,6 +2354,9 @@ async function runDuplicateScan(selectedAlgo) {
     await waitForApi();
     const activeDbPath = sessionStorage.getItem("current_db_path");
     const tablesToScan = checkedTables;
+
+    // ✅ Reinitialiser la pagination
+    currentDuplicatePage = 1;
     allDuplicates = [];
 
     for (let i = 0; i < tablesToScan.length; i++) {
@@ -2123,7 +2431,7 @@ async function runDuplicateScan(selectedAlgo) {
       if (countBadge) countBadge.textContent = "0";
     } else {
       showNotification(`${allDuplicates.length} doublon(s) trouve(s).`, true);
-      statusDiv.textContent = `${allDuplicates.length} doublon(s) identifie(s) avec l'algorithme "${selectedAlgo === "general" ? "General" : "CIN + NOM + COMMUNE + FKT"}"`;
+      statusDiv.textContent = `${allDuplicates.length} doublon(s) identifie(s) avec l'algorithme "${algoLabel}"`;
       if (countBadge) countBadge.textContent = allDuplicates.length;
       if (allDuplicates.length > 0 && allDuplicates[0].data) {
         currentColumns = Object.keys(allDuplicates[0].data);
@@ -2156,28 +2464,52 @@ function renderDuplicatesWithFilter() {
     return;
   }
 
-  const MAX_DISPLAY = 500;
-  let displayDuplicates = filteredDuplicates;
-  let hasMore = false;
-  if (filteredDuplicates.length > MAX_DISPLAY) {
-    displayDuplicates = filteredDuplicates.slice(0, MAX_DISPLAY);
-    hasMore = true;
-  }
+  const MAX_DISPLAY = 1000;
+  const pageDuplicates = paginateArray(
+    filteredDuplicates,
+    currentDuplicatePage,
+    MAX_DISPLAY,
+  );
+  const hasMore = filteredDuplicates.length > MAX_DISPLAY;
 
   let allColumns = currentColumns;
   if (
     allColumns.length === 0 &&
-    displayDuplicates.length > 0 &&
-    displayDuplicates[0].data
+    pageDuplicates.length > 0 &&
+    pageDuplicates[0].data
   ) {
-    allColumns = Object.keys(displayDuplicates[0].data);
+    allColumns = Object.keys(pageDuplicates[0].data);
   }
 
+  // Vider
+  resultsBody.innerHTML = "";
+
+  // En-tete
+  const headerEl = document.createElement("div");
+  headerEl.style.cssText =
+    "margin-bottom: 12px; font-weight: bold; color: var(--primary-color, #4f46e5);";
+  headerEl.innerHTML = `
+    ${filteredDuplicates.length} doublon(s) au total
+    ${hasMore ? `<span style="color: orange; font-weight: normal;">(Page ${currentDuplicatePage} sur ${Math.ceil(filteredDuplicates.length / MAX_DISPLAY)})</span>` : ""}
+  `;
+  resultsBody.appendChild(headerEl);
+
+  // ✅ Pagination
+  const paginationEl = buildPaginationControls({
+    currentPage: currentDuplicatePage,
+    totalItems: filteredDuplicates.length,
+    perPage: MAX_DISPLAY,
+    onPageChange: (newPage) => {
+      currentDuplicatePage = newPage;
+      renderDuplicatesWithFilter();
+      const container = document.getElementById("db-results-content");
+      if (container) container.scrollTop = 0;
+    },
+  });
+  resultsBody.appendChild(paginationEl);
+
+  // Tableau
   let html = `
-    <div style="margin-bottom: 12px; font-weight: bold; color: var(--primary-color, #4f46e5);">
-      ${filteredDuplicates.length} doublon(s) au total
-      ${hasMore ? `<span style="color: orange; font-weight: normal;">(Affichage des ${MAX_DISPLAY} premiers - Le bouton "TOUT SUPPRIMER" traite bien les ${filteredDuplicates.length})</span>` : ""}
-    </div>
     <div class="duplicates-table-wrapper" style="max-height: 500px; overflow: auto;">
       <table style="width: 100%; border-collapse: collapse; font-size: 0.75rem; background: var(--bg-container, #fff);">
         <thead style="position: sticky; top: 0; z-index: 10; background: var(--bg-secondary, #f1f5f9);">
@@ -2195,8 +2527,8 @@ function renderDuplicatesWithFilter() {
 
   html += `</tr></thead><tbody>`;
 
-  for (let idx = 0; idx < displayDuplicates.length; idx++) {
-    const dup = displayDuplicates[idx];
+  for (let idx = 0; idx < pageDuplicates.length; idx++) {
+    const dup = pageDuplicates[idx];
     const tableName = escapeHtml(dup.tableName || dup.table || "");
     const rowIndex = escapeHtml(String(dup.row_index || ""));
     const refId = escapeHtml(String(dup.reference_id || ""));
@@ -2265,11 +2597,13 @@ function renderDuplicatesWithFilter() {
 
   html += `
     </tbody></table></div>
-    ${hasMore ? `<p style="color: orange; font-size: 0.85rem; margin-top: 8px;">${filteredDuplicates.length - MAX_DISPLAY} doublons supplementaires non affiches (mais bien pris en compte par "TOUT SUPPRIMER").</p>` : ""}
   `;
 
-  resultsBody.innerHTML = html;
+  const wrapper = document.createElement("div");
+  wrapper.innerHTML = html;
+  resultsBody.appendChild(wrapper);
 
+  // Listeners
   document.querySelectorAll(".dup-checkbox").forEach((chk) => {
     chk.addEventListener("change", updateSelectAllButton);
   });
@@ -2363,7 +2697,8 @@ async function refreshDuplicateResults() {
       const tableData = await window.pywebview.api.get_table_rows(
         table,
         activeDbPath,
-        5000,
+        100000,
+        0,
       );
       processed++;
       showGlobalProgress(
@@ -2413,7 +2748,7 @@ async function refreshDuplicateResults() {
 }
 
 // ============================================
-// SUPPRESSION PAR SELECTION (batch)
+// SUPPRESSION PAR SELECTION
 // ============================================
 async function deleteSelectedDuplicatesWithProgress() {
   const checkedBoxes = document.querySelectorAll(".dup-checkbox:checked");
@@ -2484,9 +2819,6 @@ async function deleteSelectedDuplicatesWithProgress() {
   }
 }
 
-// ============================================
-// TOUT SUPPRIMER
-// ============================================
 async function deleteAllDuplicatesWithProgress() {
   if (allDuplicates.length === 0) {
     showNotification("Aucun doublon a supprimer.", false);
@@ -2682,11 +3014,11 @@ async function exportDuplicatesToPDF() {
         <style>
           * { margin: 0; padding: 0; box-sizing: border-box; }
           body { font-family: 'DejaVu Sans', Arial, sans-serif; padding: 20px; color: #1a1a2e; background: #ffffff; font-size: 8px; }
-          .header { text-align: center; padding-bottom: 15px; border-bottom: 2px solid #4f46e5; margin-bottom: 15px; }
-          .header h1 { color: #4f46e5; font-size: 18px; }
-          .summary { background: #e0e7ff; padding: 8px 14px; border-radius: 6px; margin-bottom: 12px; border-left: 4px solid #4f46e5; font-weight: 600; font-size: 12px; color: #4f46e5; }
+          .header { text-align: center; padding-bottom: 15px; border-bottom: 2px solid #1a4d3a; margin-bottom: 15px; }
+          .header h1 { color: #1a4d3a; font-size: 18px; }
+          .summary { background: #e8f3ef; padding: 8px 14px; border-radius: 6px; margin-bottom: 12px; border-left: 4px solid #1a4d3a; font-weight: 600; font-size: 12px; color: #1a4d3a; }
           table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 6.5px; }
-          th { background: #4f46e5; color: white; padding: 4px 5px; text-align: left; border: 1px solid #4f46e5; }
+          th { background: #1a4d3a; color: white; padding: 4px 5px; text-align: left; border: 1px solid #1a4d3a; }
           td { padding: 3px 5px; border: 1px solid #e2e8f0; word-wrap: break-word; max-width: 120px; }
           .footer { margin-top: 20px; padding-top: 10px; border-top: 1px solid #e2e8f0; text-align: center; color: #94a3b8; font-size: 7px; }
         </style>
@@ -2810,7 +3142,10 @@ async function initManipulatePage() {
     btnRefreshManipulate.addEventListener("click", async () => {
       await loadManipulateTables();
       if (currentManipulateTable) {
-        await loadManipulateTableData(currentManipulateTable);
+        await loadManipulateTableData(
+          currentManipulateTable,
+          currentManipulatePage,
+        );
       }
       showNotification("Donnees actualisees.", true);
     });
@@ -2821,7 +3156,8 @@ async function initManipulatePage() {
         showNotification("Veuillez d'abord selectionner une table.", false);
         return;
       }
-      await loadManipulateTableData(currentManipulateTable);
+      // ✅ Reinitialiser a la page 1
+      await loadManipulateTableData(currentManipulateTable, 1);
       showNotification("Resultats affiches.", true);
     });
   }
@@ -2865,10 +3201,14 @@ async function initManipulatePage() {
         return;
       }
       currentManipulateTable = selectedTable;
+      currentManipulatePage = 1; // ✅ Reinitialiser la pagination
       window._activeValueFilters = {};
       window._activeColumnFilters = null;
       showNotification(`Table ${selectedTable} selectionnee.`, true);
-      await loadManipulateTableData(selectedTable);
+
+      // ✅ Charger la page 1
+      await loadManipulateTableData(selectedTable, 1);
+
       if (searchInput) searchInput.value = "";
       if (filtersArea) {
         filtersArea.classList.add("hidden");
@@ -2898,6 +3238,7 @@ async function initManipulatePage() {
           resultsContainer,
           countSpan,
           currentManipulateTotalCount,
+          currentManipulateTable,
         );
         currentManipulateFiltered = currentManipulateData;
         return;
@@ -2916,11 +3257,13 @@ async function initManipulatePage() {
         } else {
           showNotification(`${filtered.length} resultat(s) trouve(s).`, true);
         }
+        // ✅ Passer currentManipulateTable explicitement
         displayManipulateData(
           filtered,
           resultsContainer,
           countSpan,
           filtered.length,
+          currentManipulateTable,
         );
         currentManipulateFiltered = filtered;
       } catch (err) {
@@ -3115,9 +3458,9 @@ async function initManipulatePage() {
                       b.style.background = "#fef3c7";
                       b.style.color = "#92400e";
                     });
-                  btn.style.borderColor = "#4f46e5";
-                  btn.style.background = "#e0e7ff";
-                  btn.style.color = "#4f46e5";
+                  btn.style.borderColor = "#1a4d3a";
+                  btn.style.background = "#e8f3ef";
+                  btn.style.color = "#1a4d3a";
                   distinctValuesContainer.style.display = "block";
                   distinctValuesTitle.innerHTML = `<i class="fas fa-list"></i> Valeurs distinctes de "${escapeHtml(actualCol)}"`;
                   distinctValuesCheckboxes.innerHTML =
@@ -3143,7 +3486,7 @@ async function initManipulatePage() {
                         label.style.cssText =
                           "display: flex; align-items: center; gap: 10px; padding: 6px 10px; background: #ffffff; border-radius: 4px; cursor: pointer; border: 1px solid #e2e8f0; font-size: 0.85rem;";
                         label.innerHTML = `
-                          <input type="checkbox" class="distinct-value-chk" data-column="${escapeHtml(actualCol)}" value="${escapeHtml(valStr)}" ${isChecked ? "checked" : ""} style="width: 18px; height: 18px; cursor: pointer; accent-color: #4f46e5;" />
+                          <input type="checkbox" class="distinct-value-chk" data-column="${escapeHtml(actualCol)}" value="${escapeHtml(valStr)}" ${isChecked ? "checked" : ""} style="width: 18px; height: 18px; cursor: pointer; accent-color: #1a4d3a;" />
                           <span style="flex: 1;">${escapeHtml(valStr)}</span>
                         `;
                         distinctValuesCheckboxes.appendChild(label);
@@ -3226,6 +3569,7 @@ async function initManipulatePage() {
                 resultsContainer,
                 countSpan,
                 currentManipulateTotalCount,
+                currentManipulateTable,
               );
               showNotification("Filtres reinitialises.", true);
             };
@@ -3324,6 +3668,7 @@ async function initManipulatePage() {
                 resultsContainer,
                 countSpan,
                 currentManipulateTotalCount,
+                currentManipulateTable,
               );
               showNotification(
                 `Affichage de ${selectedCols.length} colonne(s).`,
@@ -3344,6 +3689,7 @@ async function initManipulatePage() {
                 resultsContainer,
                 countSpan,
                 currentManipulateTotalCount,
+                currentManipulateTable,
               );
               showNotification("Toutes les colonnes sont affichees.", true);
             };
@@ -3383,6 +3729,7 @@ async function initManipulatePage() {
         resultsContainer,
         countSpan,
         currentManipulateTotalCount,
+        currentManipulateTable,
       );
       return;
     }
@@ -3399,6 +3746,7 @@ async function initManipulatePage() {
       resultsContainer,
       countSpan,
       currentManipulateTotalCount,
+      currentManipulateTable,
     );
     if (filtered.length === 0) {
       showNotification(
@@ -3490,6 +3838,7 @@ async function initManipulatePage() {
             resultsContainer,
             countSpan,
             res.data.length,
+            currentManipulateTable,
           );
           showNotification(
             `${opNames[opType] || opType} executee : ${res.data.length} resultat(s).`,
@@ -3524,29 +3873,53 @@ async function initManipulatePage() {
         '.op-btn[data-op="SELECT_ALL"]',
       );
       if (firstOpBtn) {
-        firstOpBtn.style.background = "var(--primary-color, #4f46e5)";
+        firstOpBtn.style.background = "var(--primary-color, #1a4d3a)";
         firstOpBtn.style.color = "#ffffff";
       }
       if (currentManipulateTable) {
-        loadManipulateTableData(currentManipulateTable);
+        loadManipulateTableData(currentManipulateTable, currentManipulatePage);
       }
       showNotification("Formulaire reinitialise.", true);
     });
   }
 }
 
-async function loadManipulateTableData(tableName) {
+// ============================================
+// CHARGEMENT DES DONNEES - PAGINATION SERVEUR
+// ============================================
+async function loadManipulateTableData(tableName, page = 1) {
   const container = document.querySelector(
     "#manipulate-results-table-container",
   );
   const countSpan = document.querySelector("#manipulate-response-count");
   if (!container) return;
 
+  // ✅ SECURITE : refuser une table vide
+  if (!tableName || String(tableName).trim() === "") {
+    console.error("[loadManipulateTableData] Table vide !");
+    container.innerHTML =
+      "<p style='color: red;'>Erreur : aucune table selectionnee. Veuillez selectionner une table.</p>";
+    if (countSpan) countSpan.textContent = "0";
+    return;
+  }
+
+  // ✅ Restaurer la variable globale (au cas ou)
+  currentManipulateTable = tableName;
+  currentManipulatePage = page;
+
+  console.log(
+    `[loadManipulateTableData] Chargement table="${tableName}", page=${page}`,
+  );
+
   try {
     const activeDbPath = sessionStorage.getItem("current_db_path");
+    const offset = (page - 1) * MANIPULATE_PER_PAGE;
+
     const res = await window.pywebview.api.get_table_rows(
       tableName,
       activeDbPath,
+      MANIPULATE_PER_PAGE,
+      offset,
     );
 
     if (res && res.success) {
@@ -3573,6 +3946,7 @@ async function loadManipulateTableData(tableName) {
           container,
           countSpan,
           currentManipulateTotalCount,
+          tableName,
         );
       } else {
         displayManipulateData(
@@ -3580,10 +3954,12 @@ async function loadManipulateTableData(tableName) {
           container,
           countSpan,
           currentManipulateTotalCount,
+          tableName,
         );
       }
     } else {
-      container.innerHTML = "<p>Aucune donnee trouvee.</p>";
+      container.innerHTML = `<p style="color: red;">Erreur : ${escapeHtml(res?.message || "table introuvable")}</p>`;
+      if (countSpan) countSpan.textContent = "0";
     }
   } catch (err) {
     console.error(err);
@@ -3591,11 +3967,15 @@ async function loadManipulateTableData(tableName) {
   }
 }
 
+// ============================================
+// AFFICHAGE - PAGINATION
+// ============================================
 function displayManipulateData(
   dataArray,
   container,
   countSpan,
   totalCount = null,
+  tableName = null,
 ) {
   if (!container) return;
   if (!dataArray || dataArray.length === 0) {
@@ -3604,17 +3984,28 @@ function displayManipulateData(
     return;
   }
 
+  // ✅ Utiliser la table passee en parametre, sinon la globale
+  const activeTable = tableName || currentManipulateTable;
+
+  if (!activeTable) {
+    console.error("[displayManipulateData] Aucune table active !");
+    container.innerHTML =
+      "<p style='color: red;'>Erreur : aucune table selectionnee.</p>";
+    return;
+  }
+
   const displayedCount = dataArray.length;
   const realTotal =
     totalCount !== null && totalCount !== undefined
       ? totalCount
       : displayedCount;
-  const isTruncated = realTotal > displayedCount;
 
   if (countSpan) {
-    if (isTruncated) {
-      countSpan.innerHTML = `<strong>${displayedCount}</strong> affiche(s) sur <strong>${realTotal}</strong> au total`;
-      countSpan.style.color = "#e67e22";
+    if (realTotal > displayedCount || currentManipulatePage > 1) {
+      const start = (currentManipulatePage - 1) * MANIPULATE_PER_PAGE + 1;
+      const end = start + displayedCount - 1;
+      countSpan.innerHTML = `<strong>${start}</strong> - <strong>${end}</strong> sur <strong>${realTotal}</strong>`;
+      countSpan.style.color = "var(--primary-color)";
       countSpan.style.fontWeight = "600";
     } else {
       countSpan.textContent = displayedCount;
@@ -3623,22 +4014,19 @@ function displayManipulateData(
     }
   }
 
+  // ✅ Pagination avec capture de la table dans une closure
+  const paginationEl = buildPaginationControls({
+    currentPage: currentManipulatePage,
+    totalItems: realTotal,
+    perPage: MANIPULATE_PER_PAGE,
+    onPageChange: (newPage) => {
+      console.log(`[Pagination] Page ${newPage} de la table "${activeTable}"`);
+      loadManipulateTableData(activeTable, newPage);
+    },
+  });
+
   const keys = Object.keys(dataArray[0]);
-  let html = "";
-
-  if (isTruncated) {
-    html += `
-      <div style="background: #fff3cd; border: 1px solid #ffc107; border-left: 4px solid #e67e22; padding: 10px 14px; border-radius: 6px; margin-bottom: 12px; color: #856404; font-size: 0.9rem; display: flex; align-items: center; gap: 10px;">
-        <i class="fas fa-exclamation-triangle" style="font-size: 1.2rem;"></i>
-        <div>
-          <strong>Affichage limite :</strong> ${displayedCount} lignes affichees sur <strong>${realTotal}</strong> au total.
-          Utilisez les filtres ou la recherche pour affiner les resultats.
-        </div>
-      </div>
-    `;
-  }
-
-  html += `
+  let html = `
     <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem; background: var(--bg-container, #fff); color: var(--text-color, #000);">
       <thead style="position: sticky; top: 0; background: var(--bg-secondary, #f1f5f9); z-index: 2;">
         <tr style="border-bottom: 2px solid #cbd5e1;">
@@ -3669,17 +4057,21 @@ function displayManipulateData(
   });
 
   html += `</tbody></table>`;
-  container.innerHTML = html;
 
+  container.innerHTML = "";
+  container.appendChild(paginationEl);
+  const wrapper = document.createElement("div");
+  wrapper.innerHTML = html;
+  container.appendChild(wrapper);
+
+  // Listeners
   container.querySelectorAll(".btn-manipulate-edit").forEach((btn) => {
     btn.addEventListener("click", function () {
       const rowId = parseInt(this.getAttribute("data-rowid"));
       const row = currentManipulateData.find(
         (r, i) => (r.rowid || r.id || i + 1) === rowId,
       );
-      if (row) {
-        openEditModal(currentManipulateTable, rowId, row, false);
-      }
+      if (row) openEditModal(currentManipulateTable, rowId, row, false);
     });
   });
 
@@ -3699,7 +4091,10 @@ function displayManipulateData(
           logUserAction(
             `Suppression de la ligne #${rowId} dans ${currentManipulateTable}`,
           );
-          await loadManipulateTableData(currentManipulateTable);
+          await loadManipulateTableData(
+            currentManipulateTable,
+            currentManipulatePage,
+          );
         } else {
           showNotification(
             res?.message || "Erreur lors de la suppression.",
@@ -3795,14 +4190,14 @@ function openFullScreenModal(titleText, htmlContent) {
       <div style="background: #ffffff; color: #1a1a2e; width: 100vw; height: 100vh; border-radius: 0; display: flex; flex-direction: column; overflow: hidden;">
         <div style="padding: 16px 24px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; background: #f8fafc;">
           <h2 id="modal-title-text" style="margin: 0; font-size: 1.4rem; display: flex; align-items: center; gap: 12px; color: #1a1a2e;">
-            <i class="fas fa-expand" style="color: #4f46e5;"></i>
+            <i class="fas fa-expand" style="color: #1a4d3a;"></i>
             <span style="color: #1a1a2e;">${titleText}</span>
           </h2>
           <button type="button" id="close-fullscreen-modal" style="background: none; border: none; font-size: 2rem; cursor: pointer; color: #1a1a2e;">&times;</button>
         </div>
         <div id="fullscreen-modal-body" style="padding: 24px; overflow-y: auto; flex: 1; background: #ffffff; color: #1a1a2e;"></div>
         <div style="padding: 14px 24px; border-top: 1px solid #e2e8f0; background: #f8fafc; display: flex; justify-content: flex-end; gap: 10px;">
-          <button type="button" class="button button-primary" id="modal-btn-select-all" style="background: #4f46e5; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer;">
+          <button type="button" class="button button-primary" id="modal-btn-select-all" style="background: #1a4d3a; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer;">
             <i class="fas fa-check-double"></i> Tout selectionner
           </button>
           <button type="button" class="button button-primary" id="modal-btn-delete" style="background: #dc3545; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer;">
@@ -3833,7 +4228,7 @@ function openFullScreenModal(titleText, htmlContent) {
     );
     cleanHtml = cleanHtml.replace(
       /<th/g,
-      '<th style="background: #4f46e5; color: white; padding: 10px; text-align: left; border: 1px solid #e2e8f0;"',
+      '<th style="background: #1a4d3a; color: white; padding: 10px; text-align: left; border: 1px solid #e2e8f0;"',
     );
     cleanHtml = cleanHtml.replace(
       /<td/g,
@@ -3924,10 +4319,10 @@ function openFullScreenModal(titleText, htmlContent) {
   const style = document.createElement("style");
   style.textContent = `
     #fullscreen-modal-body table { background: #ffffff !important; color: #1a1a2e !important; }
-    #fullscreen-modal-body th { background: #4f46e5 !important; color: white !important; }
+    #fullscreen-modal-body th { background: #1a4d3a !important; color: white !important; }
     #fullscreen-modal-body td { background: #ffffff !important; color: #1a1a2e !important; border: 1px solid #e2e8f0 !important; }
     #fullscreen-modal-body tr:nth-child(even) td { background: #f8fafc !important; }
-    #fullscreen-modal-body tr:hover td { background: #e0e7ff !important; }
+    #fullscreen-modal-body tr:hover td { background: #e8f3ef !important; }
   `;
   document.getElementById("fullscreen-modal-body").appendChild(style);
 }
@@ -3957,21 +4352,21 @@ function openStatisticalQueriesModal() {
     <div style="background: #ffffff; border-radius: 12px; padding: 1.5rem; max-width: 900px; width: 95%; max-height: 85vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
         <h3 style="margin: 0; color: #1a1a2e;">
-          <i class="fas fa-chart-bar" style="color: #4f46e5;"></i> Requetes statistiques
+          <i class="fas fa-chart-bar" style="color: #1a4d3a;"></i> Requetes statistiques
         </h3>
         <button type="button" id="close-stats-modal" style="background: none; border: none; font-size: 2rem; cursor: pointer; color: #1a1a2e;">&times;</button>
       </div>
       <p style="color: #64748b; margin-bottom: 1.5rem;">Selectionnez une requete pour obtenir des statistiques sur vos donnees.</p>
       <div id="stats-query-buttons" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; margin-bottom: 1.5rem;">
-        <button class="stat-query-btn" data-query="femmes_par_tranche_age" style="padding: 12px; border: 2px solid #4f46e5; border-radius: 8px; background: #ffffff; color: #4f46e5; font-weight: 600; cursor: pointer; text-align: left;"><i class="fas fa-female"></i> Femmes par tranche d'age</button>
-        <button class="stat-query-btn" data-query="personnes_par_commune" style="padding: 12px; border: 2px solid #4f46e5; border-radius: 8px; background: #ffffff; color: #4f46e5; font-weight: 600; cursor: pointer; text-align: left;"><i class="fas fa-map-marker-alt"></i> Personnes par commune</button>
-        <button class="stat-query-btn" data-query="personnes_par_lieu" style="padding: 12px; border: 2px solid #4f46e5; border-radius: 8px; background: #ffffff; color: #4f46e5; font-weight: 600; cursor: pointer; text-align: left;"><i class="fas fa-location-dot"></i> Personnes par lieu (fkt)</button>
-        <button class="stat-query-btn" data-query="superficie_par_personne" style="padding: 12px; border: 2px solid #4f46e5; border-radius: 8px; background: #ffffff; color: #4f46e5; font-weight: 600; cursor: pointer; text-align: left;"><i class="fas fa-ruler-combined"></i> Superficie par personne</button>
-        <button class="stat-query-btn" data-query="hommes_femmes" style="padding: 12px; border: 2px solid #4f46e5; border-radius: 8px; background: #ffffff; color: #4f46e5; font-weight: 600; cursor: pointer; text-align: left;"><i class="fas fa-venus-mars"></i> Repartition Hommes / Femmes</button>
-        <button class="stat-query-btn" data-query="personnes_par_filiere" style="padding: 12px; border: 2px solid #4f46e5; border-radius: 8px; background: #ffffff; color: #4f46e5; font-weight: 600; cursor: pointer; text-align: left;"><i class="fas fa-seedling"></i> Personnes par filiere</button>
-        <button class="stat-query-btn" data-query="personnes_par_categorisation" style="padding: 12px; border: 2px solid #4f46e5; border-radius: 8px; background: #ffffff; color: #4f46e5; font-weight: 600; cursor: pointer; text-align: left;"><i class="fas fa-users"></i> Personnes par categorisation EAF</button>
-        <button class="stat-query-btn" data-query="age_moyen" style="padding: 12px; border: 2px solid #4f46e5; border-radius: 8px; background: #ffffff; color: #4f46e5; font-weight: 600; cursor: pointer; text-align: left;"><i class="fas fa-birthday-cake"></i> Age moyen des personnes</button>
-        <button class="stat-query-btn" data-query="superficie_totale" style="padding: 12px; border: 2px solid #4f46e5; border-radius: 8px; background: #ffffff; color: #4f46e5; font-weight: 600; cursor: pointer; text-align: left;"><i class="fas fa-chart-area"></i> Superficie totale</button>
+        <button class="stat-query-btn" data-query="femmes_par_tranche_age" style="padding: 12px; border: 2px solid #1a4d3a; border-radius: 8px; background: #ffffff; color: #1a4d3a; font-weight: 600; cursor: pointer; text-align: left;"><i class="fas fa-female"></i> Femmes par tranche d'age</button>
+        <button class="stat-query-btn" data-query="personnes_par_commune" style="padding: 12px; border: 2px solid #1a4d3a; border-radius: 8px; background: #ffffff; color: #1a4d3a; font-weight: 600; cursor: pointer; text-align: left;"><i class="fas fa-map-marker-alt"></i> Personnes par commune</button>
+        <button class="stat-query-btn" data-query="personnes_par_lieu" style="padding: 12px; border: 2px solid #1a4d3a; border-radius: 8px; background: #ffffff; color: #1a4d3a; font-weight: 600; cursor: pointer; text-align: left;"><i class="fas fa-location-dot"></i> Personnes par lieu (fkt)</button>
+        <button class="stat-query-btn" data-query="superficie_par_personne" style="padding: 12px; border: 2px solid #1a4d3a; border-radius: 8px; background: #ffffff; color: #1a4d3a; font-weight: 600; cursor: pointer; text-align: left;"><i class="fas fa-ruler-combined"></i> Superficie par personne</button>
+        <button class="stat-query-btn" data-query="hommes_femmes" style="padding: 12px; border: 2px solid #1a4d3a; border-radius: 8px; background: #ffffff; color: #1a4d3a; font-weight: 600; cursor: pointer; text-align: left;"><i class="fas fa-venus-mars"></i> Repartition Hommes / Femmes</button>
+        <button class="stat-query-btn" data-query="personnes_par_filiere" style="padding: 12px; border: 2px solid #1a4d3a; border-radius: 8px; background: #ffffff; color: #1a4d3a; font-weight: 600; cursor: pointer; text-align: left;"><i class="fas fa-seedling"></i> Personnes par filiere</button>
+        <button class="stat-query-btn" data-query="personnes_par_categorisation" style="padding: 12px; border: 2px solid #1a4d3a; border-radius: 8px; background: #ffffff; color: #1a4d3a; font-weight: 600; cursor: pointer; text-align: left;"><i class="fas fa-users"></i> Personnes par categorisation EAF</button>
+        <button class="stat-query-btn" data-query="age_moyen" style="padding: 12px; border: 2px solid #1a4d3a; border-radius: 8px; background: #ffffff; color: #1a4d3a; font-weight: 600; cursor: pointer; text-align: left;"><i class="fas fa-birthday-cake"></i> Age moyen des personnes</button>
+        <button class="stat-query-btn" data-query="superficie_totale" style="padding: 12px; border: 2px solid #1a4d3a; border-radius: 8px; background: #ffffff; color: #1a4d3a; font-weight: 600; cursor: pointer; text-align: left;"><i class="fas fa-chart-area"></i> Superficie totale</button>
       </div>
       <div id="stats-query-params" style="margin-bottom: 1.5rem; display: none;"></div>
       <div id="stats-query-results" style="background: #f8fafc; border-radius: 8px; padding: 1rem; min-height: 100px; color: #334155;">
@@ -3994,9 +4389,9 @@ function openStatisticalQueriesModal() {
     btn.addEventListener("click", async function () {
       overlay.querySelectorAll(".stat-query-btn").forEach((b) => {
         b.style.background = "#ffffff";
-        b.style.color = "#4f46e5";
+        b.style.color = "#1a4d3a";
       });
-      this.style.background = "#4f46e5";
+      this.style.background = "#1a4d3a";
       this.style.color = "#ffffff";
 
       const queryType = this.getAttribute("data-query");
@@ -4006,7 +4401,7 @@ function openStatisticalQueriesModal() {
       if (queryType === "femmes_par_tranche_age") {
         paramsContainer.style.display = "block";
         paramsContainer.innerHTML = `
-          <div style="background: #e0e7ff; padding: 12px; border-radius: 6px; margin-bottom: 12px;">
+          <div style="background: #e8f3ef; padding: 12px; border-radius: 6px; margin-bottom: 12px;">
             <label style="display: block; font-weight: 600; margin-bottom: 6px; color: #1a1a2e;">Age minimum :</label>
             <input type="number" id="stat-age-min" value="0" min="0" max="120" style="padding: 8px; border-radius: 4px; border: 1px solid #cbd5e1; width: 100px; margin-right: 12px;" />
             <label style="display: block; font-weight: 600; margin-bottom: 6px; margin-top: 8px; color: #1a1a2e;">Age maximum :</label>
@@ -4041,7 +4436,7 @@ function openStatisticalQueriesModal() {
         if (result?.success && result.data.length > 0) {
           let html =
             '<table style="width: 100%; border-collapse: collapse; font-size: 0.9rem;">';
-          html += '<thead><tr style="background: #4f46e5; color: white;">';
+          html += '<thead><tr style="background: #1a4d3a; color: white;">';
           const firstRow = result.data[0];
           Object.keys(firstRow).forEach((k) => {
             html += `<th style="padding: 10px; text-align: left; border: 1px solid #e2e8f0;">${escapeHtml(k)}</th>`;
@@ -4096,14 +4491,13 @@ async function updateFooterVersion() {
   } catch (e) {}
 }
 
-// --- Modale A PROPOS ---
 async function showAboutModal() {
   const info = await getAppInfo();
   const appName = info?.app_name || "xl2db";
-  const appVersion = info?.app_version || "1.0.0";
+  const appVersion = info?.app_version || "1.0.2";
   const devName = info?.developer_name || "DadaRaBed";
   const devEmail = info?.developer_email || "nanoonadjah3@gmail.com";
-  const githubRepo = info?.github_repo || "DadaRaBed/xl2db_stage";
+  const githubRepo = info?.github_repo || "DadaRaBed";
   const pythonVersion = info?.python_version || "-";
   const platform = info?.platform || "-";
 
@@ -4113,7 +4507,7 @@ async function showAboutModal() {
 
   overlay.innerHTML = `
     <div style="background: #ffffff; border-radius: 12px; padding: 0; max-width: 720px; width: 95%; max-height: 88vh; overflow: hidden; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3); display: flex; flex-direction: column;">
-      <div style="background: linear-gradient(135deg, #4f46e5, #818cf8); color: white; padding: 24px; display: flex; align-items: center; gap: 16px;">
+      <div style="background: linear-gradient(135deg, #1a4d3a, #3d8b6a); color: white; padding: 24px; display: flex; align-items: center; gap: 16px;">
         <div style="width: 60px; height: 60px; background: rgba(255,255,255,0.2); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 1.8rem; font-weight: 700;">XL</div>
         <div style="flex: 1;">
           <h2 style="margin: 0 0 4px 0; font-size: 1.6rem;">${escapeHtml(appName)}</h2>
@@ -4121,41 +4515,38 @@ async function showAboutModal() {
         </div>
         <button type="button" id="close-about-modal" style="background: rgba(255,255,255,0.2); border: none; color: white; font-size: 1.5rem; cursor: pointer; width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center;">&times;</button>
       </div>
-
       <div style="padding: 24px; overflow-y: auto; flex: 1;">
         <h3 style="margin: 0 0 12px 0; color: #1a1a2e; display: flex; align-items: center; gap: 8px; font-size: 1.1rem;">
-          <i class="fas fa-book" style="color: #4f46e5;"></i> Guide de l'application
+          <i class="fas fa-book" style="color: #1a4d3a;"></i> Guide de l'application
         </h3>
-
-        <div style="background: #f8fafc; border-radius: 8px; padding: 16px; margin-bottom: 24px; border-left: 4px solid #4f46e5;">
+        <div style="background: #f8fafc; border-radius: 8px; padding: 16px; margin-bottom: 24px; border-left: 4px solid #1a4d3a;">
           <div style="margin-bottom: 14px;">
-            <strong style="color: #4f46e5; display: block; margin-bottom: 4px;"><i class="fas fa-file-import"></i> 1. Importer un fichier Excel</strong>
+            <strong style="color: #1a4d3a; display: block; margin-bottom: 4px;"><i class="fas fa-file-import"></i> 1. Importer un fichier Excel</strong>
             <div style="color: #475569; font-size: 0.9rem;">Convertissez un fichier Excel (.xlsx, .xls) en base de donnees SQLite. Chaque feuille devient une table.</div>
           </div>
           <div style="margin-bottom: 14px;">
-            <strong style="color: #4f46e5; display: block; margin-bottom: 4px;"><i class="fas fa-folder-open"></i> 2. Travailler avec une base existante</strong>
+            <strong style="color: #1a4d3a; display: block; margin-bottom: 4px;"><i class="fas fa-folder-open"></i> 2. Travailler avec une base existante</strong>
             <div style="color: #475569; font-size: 0.9rem;">Ouvrez une base de donnees existante pour la manipuler, chercher les doublons, ou l'exporter vers Excel.</div>
           </div>
           <div style="margin-bottom: 14px;">
-            <strong style="color: #4f46e5; display: block; margin-bottom: 4px;"><i class="fas fa-clone"></i> 3. Trouver les doublons</strong>
-            <div style="color: #475569; font-size: 0.9rem;">Detectez les doublons avec deux algorithmes : <em>General</em> (toutes les colonnes) ou <em>CIN + NOM + COMMUNE + FKT</em>. Supprimez en masse ou manuellement.</div>
+            <strong style="color: #1a4d3a; display: block; margin-bottom: 4px;"><i class="fas fa-clone"></i> 3. Trouver les doublons</strong>
+            <div style="color: #475569; font-size: 0.9rem;">Detectez les doublons avec differents algorithmes : General, CIN+NOM, CIN+NOM+ANNEE, CIN+NOM+ANNEE+COMMUNE+FKT.</div>
           </div>
           <div style="margin-bottom: 14px;">
-            <strong style="color: #4f46e5; display: block; margin-bottom: 4px;"><i class="fas fa-users"></i> 4. Creer une liste mere</strong>
+            <strong style="color: #1a4d3a; display: block; margin-bottom: 4px;"><i class="fas fa-users"></i> 4. Creer une liste mere</strong>
             <div style="color: #475569; font-size: 0.9rem;">Copiez TOUTES les lignes de TOUTES les tables dans une seule table <code>listes_meres</code>, avec tracabilite.</div>
           </div>
           <div style="margin-bottom: 14px;">
-            <strong style="color: #4f46e5; display: block; margin-bottom: 4px;"><i class="fas fa-sliders-h"></i> 5. Manipuler les donnees</strong>
-            <div style="color: #475569; font-size: 0.9rem;">Filtrez, recherchez, modifiez, supprimez. Utilisez les requetes statistiques pour analyser vos donnees.</div>
+            <strong style="color: #1a4d3a; display: block; margin-bottom: 4px;"><i class="fas fa-sliders-h"></i> 5. Manipuler les donnees</strong>
+            <div style="color: #475569; font-size: 0.9rem;">Filtrez, recherchez, modifiez, supprimez. Utilisez la pagination pour naviguer dans les grandes tables.</div>
           </div>
           <div>
-            <strong style="color: #4f46e5; display: block; margin-bottom: 4px;"><i class="fas fa-file-excel"></i> 6. Exporter vers Excel</strong>
+            <strong style="color: #1a4d3a; display: block; margin-bottom: 4px;"><i class="fas fa-file-excel"></i> 6. Exporter vers Excel</strong>
             <div style="color: #475569; font-size: 0.9rem;">Exportez vos tables ou resultats vers Excel avec une mise en forme professionnelle automatique.</div>
           </div>
         </div>
-
         <h3 style="margin: 0 0 12px 0; color: #1a1a2e; display: flex; align-items: center; gap: 8px; font-size: 1.1rem;">
-          <i class="fas fa-user-circle" style="color: #4f46e5;"></i> A propos du developpeur
+          <i class="fas fa-user-circle" style="color: #1a4d3a;"></i> A propos du developpeur
         </h3>
         <div style="background: #f8fafc; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
           <div style="font-size: 1rem; font-weight: 600; color: #1a1a2e; margin-bottom: 8px;">${escapeHtml(devName)}</div>
@@ -4163,17 +4554,16 @@ async function showAboutModal() {
             Developpeur de l'application ${escapeHtml(appName)}. N'hesitez pas a me contacter pour toute question, suggestion ou signalement de bug.
           </div>
           <div style="display: flex; align-items: center; gap: 8px; color: #475569; font-size: 0.9rem; margin-bottom: 8px;">
-            <i class="fas fa-envelope" style="color: #4f46e5; width: 18px;"></i>
-            <a href="mailto:${escapeHtml(devEmail)}" style="color: #4f46e5; text-decoration: none;">${escapeHtml(devEmail)}</a>
+            <i class="fas fa-envelope" style="color: #1a4d3a; width: 18px;"></i>
+            <a href="mailto:${escapeHtml(devEmail)}" style="color: #1a4d3a; text-decoration: none;">${escapeHtml(devEmail)}</a>
           </div>
           <div style="display: flex; align-items: center; gap: 8px; color: #475569; font-size: 0.9rem;">
-            <i class="fab fa-github" style="color: #4f46e5; width: 18px;"></i>
-            <a href="https://github.com/${escapeHtml(githubRepo)}" style="color: #4f46e5; text-decoration: none;" onclick="window.pywebview.api.open_url_in_browser('https://github.com/${escapeHtml(githubRepo)}'); return false;">
+            <i class="fab fa-github" style="color: #1a4d3a; width: 18px;"></i>
+            <a href="https://github.com/${escapeHtml(githubRepo)}" style="color: #1a4d3a; text-decoration: none;" onclick="window.pywebview.api.open_url_in_browser('https://github.com/${escapeHtml(githubRepo)}'); return false;">
               github.com/${escapeHtml(githubRepo)}
             </a>
           </div>
         </div>
-
         <details style="background: #f1f5f9; border-radius: 8px; padding: 12px 16px;">
           <summary style="cursor: pointer; font-weight: 600; color: #475569; font-size: 0.9rem;">
             <i class="fas fa-cog"></i> Informations techniques
@@ -4186,7 +4576,6 @@ async function showAboutModal() {
           </div>
         </details>
       </div>
-
       <div style="padding: 16px 24px; border-top: 1px solid #e2e8f0; background: #f8fafc; display: flex; justify-content: flex-end; gap: 10px;">
         <button type="button" id="btn-close-about" style="padding: 0.6rem 1.5rem; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; background: #6c757d; color: white;">Fermer</button>
       </div>
@@ -4201,7 +4590,6 @@ async function showAboutModal() {
   });
 }
 
-// --- Modale MISES A JOUR (avec auto-update) ---
 async function checkForUpdates() {
   const overlay = document.createElement("div");
   overlay.className = "edit-modal-overlay";
@@ -4210,24 +4598,36 @@ async function checkForUpdates() {
   overlay.innerHTML = `
     <div style="background: #ffffff; border-radius: 12px; padding: 2rem; max-width: 520px; width: 90%; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3); text-align: center;">
       <div id="update-content">
-        <i class="fas fa-spinner fa-spin" style="font-size: 3rem; color: #4f46e5; margin-bottom: 1rem;"></i>
+        <i class="fas fa-spinner fa-spin" style="font-size: 3rem; color: #1a4d3a; margin-bottom: 1rem;"></i>
         <h3 style="margin: 0 0 0.5rem 0; color: #1a1a2e;">Verification des mises a jour...</h3>
         <p style="color: #64748b;">Connexion au serveur, veuillez patienter.</p>
       </div>
     </div>
   `;
   document.body.appendChild(overlay);
-
   const close = () => overlay.remove();
   overlay.addEventListener("click", (e) => {
     if (e.target === overlay) close();
   });
-
   const content = overlay.querySelector("#update-content");
 
   try {
     await waitForApi();
     const result = await window.pywebview.api.check_for_updates();
+
+    // Cas "pas d'internet"
+    if (result && result.no_internet) {
+      content.innerHTML = `
+        <i class="fas fa-wifi" style="font-size: 3rem; color: #dc3545; margin-bottom: 1rem;"></i>
+        <h3 style="margin: 0 0 0.5rem 0; color: #1a1a2e;">Connexion impossible</h3>
+        <p style="color: #64748b; margin-bottom: 1.5rem;">
+          ${escapeHtml(result.message || "Pas de connexion internet ou reseau indisponible.")}
+        </p>
+        <button type="button" id="btn-close-updates" style="padding: 0.6rem 1.5rem; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; background: #6c757d; color: white;">Fermer</button>
+      `;
+      content.querySelector("#btn-close-updates").onclick = close;
+      return;
+    }
 
     if (!result || !result.success) {
       content.innerHTML = `
@@ -4247,63 +4647,51 @@ async function checkForUpdates() {
       `;
     } else {
       content.innerHTML = `
-        <i class="fas fa-download" style="font-size: 3rem; color: #4f46e5; margin-bottom: 1rem;"></i>
+        <i class="fas fa-download" style="font-size: 3rem; color: #1a4d3a; margin-bottom: 1rem;"></i>
         <h3 style="margin: 0 0 0.5rem 0; color: #1a1a2e;">Nouvelle version disponible !</h3>
         <p style="color: #64748b; margin-bottom: 0.5rem;">
           Version actuelle : <strong>${escapeHtml(result.current_version)}</strong>
         </p>
-        <p style="color: #4f46e5; font-weight: 600; margin-bottom: 1rem;">
+        <p style="color: #1a4d3a; font-weight: 600; margin-bottom: 1rem;">
           Nouvelle version : <strong>${escapeHtml(result.latest_version)}</strong>
         </p>
         ${
           result.release_notes
-            ? `
-          <div style="text-align: left; background: #f8fafc; border-radius: 6px; padding: 12px; margin-bottom: 1rem; max-height: 200px; overflow-y: auto; font-size: 0.85rem; color: #475569;">
-            <strong style="display: block; margin-bottom: 6px; color: #1a1a2e;">Notes de version :</strong>
-            <pre style="white-space: pre-wrap; word-wrap: break-word; font-family: inherit; margin: 0;">${escapeHtml(result.release_notes)}</pre>
-          </div>
-        `
+            ? `<div style="text-align: left; background: #f8fafc; border-radius: 6px; padding: 12px; margin-bottom: 1rem; max-height: 200px; overflow-y: auto; font-size: 0.85rem; color: #475569;">
+                <strong style="display: block; margin-bottom: 6px; color: #1a1a2e;">Notes de version :</strong>
+                <pre style="white-space: pre-wrap; word-wrap: break-word; font-family: inherit; margin: 0;">${escapeHtml(result.release_notes)}</pre>
+              </div>`
             : ""
         }
         <div style="display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
-          <button type="button" id="btn-download-update" style="padding: 0.6rem 1.5rem; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; background: #4f46e5; color: white;">
+          <button type="button" id="btn-download-update" style="padding: 0.6rem 1.5rem; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; background: #1a4d3a; color: white;">
             <i class="fas fa-download"></i> Telecharger et installer
           </button>
           <button type="button" id="btn-close-updates" style="padding: 0.6rem 1.5rem; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; background: #6c757d; color: white;">Plus tard</button>
         </div>
       `;
-
       const downloadBtn = content.querySelector("#btn-download-update");
       if (downloadBtn) {
         downloadBtn.onclick = async () => {
           if (
             !confirm(
-              "Mise a jour automatique\\n\\n" +
-                "L'application va :\\n" +
-                "1. Telecharger la nouvelle version\\n" +
-                "2. Se fermer automatiquement\\n" +
-                "3. Se relancer avec la nouvelle version\\n\\n" +
-                "Continuer ?",
+              "Mise a jour automatique\n\nL'application va :\n1. Telecharger la nouvelle version\n2. Se fermer automatiquement\n3. Se relancer avec la nouvelle version\n\nContinuer ?",
             )
           )
             return;
-
           downloadBtn.disabled = true;
           downloadBtn.innerHTML =
-            '<i class="fas fa-spinner fa-spin"></i> Telechargement en cours...';
-
+            '<i class="fas fa-spinner fa-spin"></i> Telechargement...';
           try {
             const res = await window.pywebview.api.download_and_install_update(
               result.download_url,
             );
-
             if (res && !res.success) {
-              alert("Erreur : " + res.message);
+              alert("Erreur : " + (res.message || "Echec."));
               downloadBtn.disabled = false;
               downloadBtn.innerHTML =
                 '<i class="fas fa-download"></i> Telecharger et installer';
             }
-            // Si succes, l'app se ferme et se relance automatiquement
           } catch (err) {
             alert("Erreur : " + err.message);
             downloadBtn.disabled = false;
@@ -4313,7 +4701,6 @@ async function checkForUpdates() {
         };
       }
     }
-
     const closeBtn = content.querySelector("#btn-close-updates");
     if (closeBtn) closeBtn.onclick = close;
   } catch (err) {
@@ -4328,7 +4715,6 @@ async function checkForUpdates() {
     if (closeBtn) closeBtn.onclick = close;
   }
 }
-// --- Modale NOUS CONTACTER ---
 function showContactModal() {
   const overlay = document.createElement("div");
   overlay.className = "edit-modal-overlay";
@@ -4336,38 +4722,32 @@ function showContactModal() {
 
   overlay.innerHTML = `
     <div style="background: #ffffff; border-radius: 12px; padding: 0; max-width: 560px; width: 95%; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3); overflow: hidden;">
-      <div style="background: linear-gradient(135deg, #4f46e5, #818cf8); color: white; padding: 20px 24px; display: flex; align-items: center; justify-content: space-between;">
+      <div style="background: linear-gradient(135deg, #1a4d3a, #3d8b6a); color: white; padding: 20px 24px; display: flex; align-items: center; justify-content: space-between;">
         <h3 style="margin: 0; font-size: 1.2rem; display: flex; align-items: center; gap: 10px;">
           <i class="fas fa-envelope"></i> Nous contacter
         </h3>
         <button type="button" id="close-contact-modal" style="background: rgba(255,255,255,0.2); border: none; color: white; font-size: 1.5rem; cursor: pointer; width: 32px; height: 32px; border-radius: 50%;">&times;</button>
       </div>
-
       <div style="padding: 24px;">
         <p style="color: #64748b; font-size: 0.9rem; margin-bottom: 1.5rem;">
           Envoyez un email au developpeur (DadaRaBed). Nous vous repondrons dans les plus brefs delais.
         </p>
-
         <div class="form-group" style="margin-bottom: 1rem;">
           <label style="display: block; font-weight: 600; margin-bottom: 6px; color: #334155; font-size: 0.9rem;">Votre email (optionnel) :</label>
           <input type="email" id="contact-email" placeholder="votre.email@example.com" style="width: 100%; padding: 0.6rem; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.9rem; box-sizing: border-box;" />
         </div>
-
         <div class="form-group" style="margin-bottom: 1rem;">
           <label style="display: block; font-weight: 600; margin-bottom: 6px; color: #334155; font-size: 0.9rem;">Sujet :</label>
           <input type="text" id="contact-subject" placeholder="Sujet de votre message" value="[xl2db] Demande de contact" style="width: 100%; padding: 0.6rem; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.9rem; box-sizing: border-box;" />
         </div>
-
         <div class="form-group" style="margin-bottom: 1rem;">
           <label style="display: block; font-weight: 600; margin-bottom: 6px; color: #334155; font-size: 0.9rem;">Message :</label>
           <textarea id="contact-message" rows="6" placeholder="Decrivez votre demande, question ou suggestion..." style="width: 100%; padding: 0.6rem; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.9rem; box-sizing: border-box; font-family: inherit; resize: vertical;"></textarea>
         </div>
-
         <div id="contact-message-status" style="margin-bottom: 1rem;"></div>
-
         <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 1.5rem;">
           <button type="button" id="btn-cancel-contact" style="padding: 0.6rem 1.5rem; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; background: #6c757d; color: white;">Annuler</button>
-          <button type="button" id="btn-send-contact" style="padding: 0.6rem 1.5rem; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; background: #4f46e5; color: white;">
+          <button type="button" id="btn-send-contact" style="padding: 0.6rem 1.5rem; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; background: #1a4d3a; color: white;">
             <i class="fas fa-paper-plane"></i> Envoyer
           </button>
         </div>
@@ -4394,10 +4774,8 @@ function showContactModal() {
         '<p style="color: #dc3545; font-size: 0.9rem;"><i class="fas fa-exclamation-circle"></i> Veuillez ecrire un message.</p>';
       return;
     }
-
     statusEl.innerHTML =
-      '<p style="color: #4f46e5; font-size: 0.9rem;"><i class="fas fa-spinner fa-spin"></i> Envoi en cours...</p>';
-
+      '<p style="color: #1a4d3a; font-size: 0.9rem;"><i class="fas fa-spinner fa-spin"></i> Envoi en cours...</p>';
     try {
       await waitForApi();
       const result = await window.pywebview.api.send_contact_email(
@@ -4405,7 +4783,6 @@ function showContactModal() {
         message,
         email,
       );
-
       if (result && result.success) {
         statusEl.innerHTML =
           '<p style="color: #27ae60; font-size: 0.9rem;"><i class="fas fa-check-circle"></i> ' +
@@ -4436,90 +4813,6 @@ function showContactModal() {
 // INITIALISATION DES NOUVELLES FONCTIONNALITES
 // ============================================
 function initNewFeatures() {
-  // Dans initNewFeatures(), ajoutez :
-  const btnCleanDb = document.getElementById("btn-clean-db");
-  if (btnCleanDb) {
-    btnCleanDb.addEventListener("click", async () => {
-      if (!isDbOpen) {
-        showNotification("Veuillez d'abord ouvrir une base de donnees.", false);
-        return;
-      }
-      if (
-        !confirm(
-          "Nettoyer les donnees ?\\n\\n" +
-            "Cette operation va remplacer toutes les valeurs vides (NaN/Null) par :\\n" +
-            "- 'Non specifie' pour les colonnes texte\\n" +
-            "- 0 pour les colonnes numeriques\\n\\n" +
-            "Continuer ?",
-        )
-      )
-        return;
-
-      showGlobalProgress(30, true);
-      showNotificationWithProgress("Nettoyage en cours...", 30, true);
-
-      try {
-        const activeDbPath = sessionStorage.getItem("current_db_path");
-        const result =
-          await window.pywebview.api.clean_database_values(activeDbPath);
-        showGlobalProgress(100, true);
-
-        if (result && result.success) {
-          showNotification(result.message, true);
-          logUserAction(`Nettoyage de la base`);
-        } else {
-          showNotification(
-            result?.message || "Erreur lors du nettoyage.",
-            false,
-          );
-        }
-      } catch (err) {
-        console.error(err);
-        showNotification("Erreur lors du nettoyage.", false);
-      }
-    });
-  }
-
-  // Et pour l'export Excel :
-  const btnExportExcel = document.getElementById("btn-export-excel");
-  if (btnExportExcel) {
-    btnExportExcel.addEventListener("click", async () => {
-      if (!isDbOpen) {
-        showNotification("Veuillez d'abord ouvrir une base de donnees.", false);
-        return;
-      }
-      try {
-        const saveResult =
-          await window.pywebview.api.select_excel_export_file();
-        if (!saveResult || !saveResult.success) return;
-
-        showGlobalProgress(30, true);
-        showNotificationWithProgress("Export Excel en cours...", 30, true);
-
-        const activeDbPath = sessionStorage.getItem("current_db_path");
-        const result = await window.pywebview.api.export_database_to_excel(
-          saveResult.file_path,
-          activeDbPath,
-        );
-
-        showGlobalProgress(100, true);
-
-        if (result && result.success) {
-          showNotification(result.message, true);
-          logUserAction(`Export Excel reussi`);
-        } else {
-          showNotification(
-            result?.message || "Erreur lors de l'export.",
-            false,
-          );
-        }
-      } catch (err) {
-        console.error(err);
-        showNotification("Erreur lors de l'export Excel.", false);
-      }
-    });
-  }
-
   const btnExportResult = document.getElementById("btn-export-result");
   if (btnExportResult) {
     btnExportResult.addEventListener("click", () => {
@@ -4567,9 +4860,8 @@ function initNewFeatures() {
   if (btnOpenDb) btnOpenDb.addEventListener("click", openSelectedDatabase);
 
   const btnDeleteSelectedDb = document.getElementById("btn-delete-selected-db");
-  if (btnDeleteSelectedDb) {
+  if (btnDeleteSelectedDb)
     btnDeleteSelectedDb.addEventListener("click", deleteSelectedDatabase);
-  }
 
   const terminateBtns = [
     document.getElementById("btn-terminate-database-existing"),
@@ -4590,50 +4882,39 @@ function initNewFeatures() {
   }
 
   const btnCreateDbBack = document.getElementById("btn-create-db-back");
-  if (btnCreateDbBack) {
-    btnCreateDbBack.addEventListener("click", () => {
-      showView(dashboardView);
-    });
-  }
+  if (btnCreateDbBack)
+    btnCreateDbBack.addEventListener("click", () => showView(dashboardView));
 
   const btnSelectCreateExcel = document.getElementById(
     "btn-select-create-excel",
   );
-  if (btnSelectCreateExcel) {
+  if (btnSelectCreateExcel)
     btnSelectCreateExcel.addEventListener("click", selectCreateDbExcelFile);
-  }
 
   const btnCreateFromExcel = document.getElementById("btn-create-from-excel");
-  if (btnCreateFromExcel) {
+  if (btnCreateFromExcel)
     btnCreateFromExcel.addEventListener("click", createDatabaseFromExcel);
-  }
 
   const btnCreateEmpty = document.getElementById("btn-create-empty");
-  if (btnCreateEmpty) {
+  if (btnCreateEmpty)
     btnCreateEmpty.addEventListener("click", createEmptyDatabase);
-  }
 
   const btnExportCreated = document.getElementById("btn-export-created-db");
-  if (btnExportCreated) {
+  if (btnExportCreated)
     btnExportCreated.addEventListener("click", exportCreatedDatabaseToExcel);
-  }
 
   const btnCreateMasterList = document.getElementById("btn-create-master-list");
-  if (btnCreateMasterList) {
+  if (btnCreateMasterList)
     btnCreateMasterList.addEventListener("click", createMasterList);
-  }
 
   const btnOpenStats = document.getElementById("btn-open-statistical-queries");
-  if (btnOpenStats) {
+  if (btnOpenStats)
     btnOpenStats.addEventListener("click", openStatisticalQueriesModal);
-  }
 
-  // Boutons "Precedent" dans les topbars
   document.querySelectorAll(".btn-back-global").forEach((btn) => {
     btn.addEventListener("click", goBack);
   });
 
-  // Boutons A propos / Mises a jour / Contact (dans les menus burger)
   document.addEventListener("click", (e) => {
     if (e.target.closest(".about-global-btn")) {
       e.preventDefault();
@@ -4658,14 +4939,194 @@ function initNewFeatures() {
     }
   });
 
-  // Footer
   const footerCheckUpdates = document.getElementById("footer-check-updates");
-  if (footerCheckUpdates) {
+  if (footerCheckUpdates)
     footerCheckUpdates.addEventListener("click", checkForUpdates);
-  }
   const footerContact = document.getElementById("footer-contact");
-  if (footerContact) {
-    footerContact.addEventListener("click", showContactModal);
+  if (footerContact) footerContact.addEventListener("click", showContactModal);
+
+  // ============================================================
+  // BOUTON "NETTOYER LES DONNEES"
+  // ============================================================
+  // ============================================================
+  // BOUTON "2. NETTOYER LES DONNEES"
+  // ============================================================
+  const btnCleanDb = document.getElementById("btn-clean-db");
+  if (btnCleanDb) {
+    btnCleanDb.addEventListener("click", async () => {
+      console.log("[CLEAN] === Bouton Nettoyer les donnees clique ===");
+
+      if (!isDbOpen) {
+        showNotification("Veuillez d'abord ouvrir une base de donnees.", false);
+        return;
+      }
+
+      if (
+        !confirm(
+          "Nettoyer les donnees ?\n\n" +
+            "Cette operation va remplacer toutes les valeurs vides (NaN/Null) par :\n" +
+            "- 'Non specifie' pour les colonnes texte\n" +
+            "- 0 pour les colonnes numeriques\n\n" +
+            "Continuer ?",
+        )
+      )
+        return;
+
+      try {
+        let activeDbPath = sessionStorage.getItem("current_db_path");
+        console.log("[CLEAN] activeDbPath (sessionStorage) :", activeDbPath);
+
+        if (!activeDbPath) {
+          const dbFileSelect = document.getElementById("db-file-select");
+          activeDbPath = dbFileSelect?.value;
+          if (activeDbPath) {
+            sessionStorage.setItem("current_db_path", activeDbPath);
+          }
+        }
+
+        if (!activeDbPath) {
+          showNotification("Impossible de determiner la base active.", false);
+          return;
+        }
+
+        showGlobalProgress(30, true);
+        showNotificationWithProgress("Nettoyage en cours...", 30, true);
+
+        console.log("[CLEAN] Appel API clean_database_values :", activeDbPath);
+        const result =
+          await window.pywebview.api.clean_database_values(activeDbPath);
+        console.log("[CLEAN] Resultat :", result);
+
+        showGlobalProgress(100, true);
+        showNotificationWithProgress("Nettoyage termine", 100, true);
+
+        if (result && result.success) {
+          showNotification(
+            result.message || "Nettoyage termine avec succes.",
+            true,
+          );
+          logUserAction(
+            `Nettoyage de la base : ${result.cleaned_tables?.length || 0} table(s)`,
+          );
+
+          const toggleChecked = document.getElementById(
+            "toggle-show-tables-list",
+          )?.checked;
+          if (toggleChecked && activeDbPath) {
+            await loadDatabaseDetails(activeDbPath);
+          }
+        } else {
+          showNotification(
+            result?.message || "Erreur lors du nettoyage.",
+            false,
+          );
+        }
+      } catch (err) {
+        console.error("[CLEAN] Exception :", err);
+        showGlobalProgress(0, false);
+        showNotification(`Erreur lors du nettoyage : ${err.message}`, false);
+      }
+    });
+  }
+
+  // ============================================================
+  // BOUTON "4. EXPORTER VERS EXCEL"
+  // ============================================================
+  const btnExportExcel = document.getElementById("btn-export-excel");
+  if (btnExportExcel) {
+    btnExportExcel.addEventListener("click", async () => {
+      console.log("[EXPORT] === Bouton Export Excel clique ===");
+
+      if (!isDbOpen) {
+        showNotification("Veuillez d'abord ouvrir une base de donnees.", false);
+        return;
+      }
+
+      try {
+        // Recuperer le chemin de la base
+        let activeDbPath = sessionStorage.getItem("current_db_path");
+        console.log("[EXPORT] activeDbPath (sessionStorage) :", activeDbPath);
+
+        // Fallback : lire depuis le select
+        if (!activeDbPath) {
+          const dbFileSelect = document.getElementById("db-file-select");
+          activeDbPath = dbFileSelect?.value;
+          console.log(
+            "[EXPORT] activeDbPath (fallback select) :",
+            activeDbPath,
+          );
+
+          if (activeDbPath) {
+            sessionStorage.setItem("current_db_path", activeDbPath);
+          }
+        }
+
+        if (!activeDbPath) {
+          showNotification(
+            "Impossible de determiner la base active. Veuillez reouvrir la base.",
+            false,
+          );
+          return;
+        }
+
+        // Selection du fichier de sortie
+        console.log("[EXPORT] Selection du fichier de sortie...");
+        const saveResult =
+          await window.pywebview.api.select_excel_export_file();
+        console.log("[EXPORT] saveResult :", saveResult);
+
+        if (!saveResult || !saveResult.success) {
+          if (saveResult?.message !== "Aucun fichier selectionne.") {
+            showNotification(
+              saveResult?.message || "Aucun fichier selectionne.",
+              false,
+            );
+          }
+          return;
+        }
+
+        showGlobalProgress(30, true);
+        showNotificationWithProgress("Export Excel en cours...", 30, true);
+
+        console.log("[EXPORT] Appel API export_database_to_excel :", {
+          output: saveResult.file_path,
+          db: activeDbPath,
+        });
+
+        // Appel API
+        const result = await window.pywebview.api.export_database_to_excel(
+          saveResult.file_path,
+          activeDbPath,
+        );
+
+        console.log("[EXPORT] Resultat :", result);
+
+        showGlobalProgress(100, true);
+        showNotificationWithProgress("Export termine", 100, true);
+
+        if (result && result.success) {
+          showNotification(
+            result.message || `Excel exporte : ${saveResult.file_path}`,
+            true,
+          );
+          logUserAction(
+            `Export Excel : ${result.tables_exported?.length || 0} feuille(s)`,
+          );
+        } else {
+          showNotification(
+            result?.message || "Erreur lors de l'export Excel.",
+            false,
+          );
+        }
+      } catch (err) {
+        console.error("[EXPORT] Exception :", err);
+        showGlobalProgress(0, false);
+        showNotification(
+          `Erreur lors de l'export Excel : ${err.message}`,
+          false,
+        );
+      }
+    });
   }
 }
 
@@ -4748,9 +5209,9 @@ async function exportResultsToPDF() {
       <html><head><meta charset="UTF-8"><title>Export des resultats</title>
       <style>
         body { font-family: Arial, sans-serif; padding: 40px; }
-        h1 { color: #4f46e5; border-bottom: 3px solid #4f46e5; padding-bottom: 10px; }
+        h1 { color: #1a4d3a; border-bottom: 3px solid #1a4d3a; padding-bottom: 10px; }
         table { width: 100%; border-collapse: collapse; margin: 20px 0; font-size: 11px; }
-        th { background: #4f46e5; color: white; padding: 10px; text-align: left; }
+        th { background: #1a4d3a; color: white; padding: 10px; text-align: left; }
         td { padding: 8px 10px; border-bottom: 1px solid #ddd; }
         tr:nth-child(even) { background: #f8fafc; }
       </style></head><body>
@@ -4821,7 +5282,7 @@ async function generateStatistics() {
           </div>`;
       } else {
         html += `
-          <div class="stat-card" style="border-left-color: #10b981;">
+          <div class="stat-card" style="border-left-color: #3d8b6a;">
             <h4>${escapeHtml(col)}</h4>
             <div style="font-size: 0.9rem;">
               <span class="label">Valeurs distinctes :</span> <strong>${data.distinct_count}</strong>
@@ -5008,7 +5469,7 @@ function performResultOperation(operation) {
           break;
       }
       resultHtml += `
-        <div style="background: var(--bg-secondary, #f8fafc); padding: 0.75rem; border-radius: 6px; border-left: 3px solid #4f46e5;">
+        <div style="background: var(--bg-secondary, #f8fafc); padding: 0.75rem; border-radius: 6px; border-left: 3px solid #1a4d3a;">
           <div style="font-size: 0.75rem; color: var(--text-muted, #64748b);">${escapeHtml(colName)}</div>
           <div style="font-size: 1rem; font-weight: 600;">${operationLabel} : ${operationResult} <span style="font-size: 0.75rem; font-weight: 400; color: var(--text-muted, #64748b);">(n=${data.length})</span></div>
         </div>`;
@@ -5032,7 +5493,7 @@ function initSqlOperations() {
         b.style.background = "";
         b.style.color = "";
       });
-      e.target.style.background = "var(--primary-color, #4f46e5)";
+      e.target.style.background = "var(--primary-color, #1a4d3a)";
       e.target.style.color = "#ffffff";
       document.getElementById("selected-operation-type").value =
         e.target.getAttribute("data-op");
@@ -5058,9 +5519,13 @@ document.addEventListener("DOMContentLoaded", () => {
     setupForm.addEventListener("submit", async (event) => {
       event.preventDefault();
       const pseudo = document.querySelector("#setup-pseudo")?.value.trim();
+      const email = document.querySelector("#setup-email")?.value.trim() || "";
       const password = document.querySelector("#setup-password")?.value;
       if (!pseudo || !password) {
-        showMessage("#setup-message", "Veuillez remplir tous les champs.");
+        showMessage(
+          "#setup-message",
+          "Veuillez remplir les champs obligatoires.",
+        );
         return;
       }
       try {
@@ -5068,6 +5533,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const result = await window.pywebview.api.create_first_user(
           pseudo,
           password,
+          email,
         );
         showMessage(
           "#setup-message",
@@ -5087,7 +5553,6 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     });
   }
-
   if (loginForm) {
     loginForm.addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -5239,4 +5704,198 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     });
   }
+  // ============================================================
+  // MOT DE PASSE OUBLIE - Listeners
+  // ============================================================
+  document
+    .getElementById("forgot-password-link")
+    ?.addEventListener("click", showForgotPasswordView);
+
+  document
+    .getElementById("forgot-email-form")
+    ?.addEventListener("submit", handleForgotEmailSubmit);
+
+  document
+    .getElementById("forgot-code-form")
+    ?.addEventListener("submit", handleForgotCodeSubmit);
+
+  document
+    .getElementById("forgot-password-form")
+    ?.addEventListener("submit", handleForgotPasswordSubmit);
+
+  ["1", "2", "3"].forEach((n) => {
+    document
+      .getElementById(`forgot-cancel-${n}`)
+      ?.addEventListener("click", cancelForgotPassword);
+  });
 });
+
+// ============================================
+// MOT DE PASSE OUBLIE
+// ============================================
+function resetForgotPasswordUI() {
+  forgotPasswordState = { step: 1, userId: null, pseudo: null, email: null };
+  const s1 = document.getElementById("forgot-step-email");
+  const s2 = document.getElementById("forgot-step-code");
+  const s3 = document.getElementById("forgot-step-password");
+  if (s1) s1.classList.remove("hidden");
+  if (s2) s2.classList.add("hidden");
+  if (s3) s3.classList.add("hidden");
+
+  const emailInput = document.getElementById("forgot-email-input");
+  const codeInput = document.getElementById("forgot-code-input");
+  const pwdInput = document.getElementById("forgot-new-password");
+  const pwdConfirm = document.getElementById("forgot-confirm-password");
+  if (emailInput) emailInput.value = "";
+  if (codeInput) codeInput.value = "";
+  if (pwdInput) pwdInput.value = "";
+  if (pwdConfirm) pwdConfirm.value = "";
+
+  const title = document.getElementById("forgot-title");
+  const subtitle = document.getElementById("forgot-subtitle");
+  if (title) title.textContent = "Mot de passe oublie";
+  if (subtitle)
+    subtitle.textContent =
+      "Saisissez votre email pour recevoir un code de validation.";
+
+  showMessage("#forgot-message", "");
+}
+
+function showForgotPasswordView() {
+  resetForgotPasswordUI();
+  showView(forgotPasswordView);
+  setTimeout(() => {
+    document.getElementById("forgot-email-input")?.focus();
+  }, 100);
+}
+
+function cancelForgotPassword() {
+  resetForgotPasswordUI();
+  showView(loginView);
+}
+
+async function handleForgotEmailSubmit(e) {
+  e.preventDefault();
+  const email = document.getElementById("forgot-email-input")?.value.trim();
+  if (!email) {
+    showMessage("#forgot-message", "Veuillez saisir votre email.");
+    return;
+  }
+  try {
+    await waitForApi();
+    const result = await window.pywebview.api.request_password_reset(email);
+    if (!result || !result.success) {
+      showMessage("#forgot-message", result?.message || "Erreur.");
+      return;
+    }
+    forgotPasswordState.step = 2;
+    forgotPasswordState.userId = result.user_id;
+    forgotPasswordState.pseudo = result.pseudo;
+    forgotPasswordState.email = email;
+
+    document.getElementById("forgot-step-email")?.classList.add("hidden");
+    document.getElementById("forgot-step-code")?.classList.remove("hidden");
+
+    const title = document.getElementById("forgot-title");
+    const subtitle = document.getElementById("forgot-subtitle");
+    const userName = document.getElementById("forgot-user-name");
+    if (title) title.textContent = "Verification du code";
+    if (subtitle) subtitle.textContent = "Un code vous a ete envoye par email.";
+    if (userName) userName.textContent = `Utilisateur : ${result.pseudo}`;
+
+    showMessage("#forgot-message", result.message, true);
+    setTimeout(() => {
+      document.getElementById("forgot-code-input")?.focus();
+    }, 100);
+  } catch (err) {
+    console.error(err);
+    showMessage("#forgot-message", "Erreur de communication.");
+  }
+}
+
+async function handleForgotCodeSubmit(e) {
+  e.preventDefault();
+  const code = document.getElementById("forgot-code-input")?.value.trim();
+  if (!code) {
+    showMessage("#forgot-message", "Veuillez saisir le code recu.");
+    return;
+  }
+  try {
+    await waitForApi();
+    const result = await window.pywebview.api.verify_reset_code(
+      forgotPasswordState.userId,
+      code,
+    );
+    if (!result || !result.success) {
+      showMessage("#forgot-message", result?.message || "Code incorrect.");
+      return;
+    }
+    forgotPasswordState.step = 3;
+    document.getElementById("forgot-step-code")?.classList.add("hidden");
+    document.getElementById("forgot-step-password")?.classList.remove("hidden");
+
+    const title = document.getElementById("forgot-title");
+    const subtitle = document.getElementById("forgot-subtitle");
+    const userName2 = document.getElementById("forgot-user-name-2");
+    if (title) title.textContent = "Nouveau mot de passe";
+    if (subtitle) subtitle.textContent = "Choisissez un nouveau mot de passe.";
+    if (userName2)
+      userName2.textContent = `Utilisateur : ${forgotPasswordState.pseudo}`;
+
+    showMessage("#forgot-message", result.message, true);
+    setTimeout(() => {
+      document.getElementById("forgot-new-password")?.focus();
+    }, 100);
+  } catch (err) {
+    console.error(err);
+    showMessage("#forgot-message", "Erreur de communication.");
+  }
+}
+
+async function handleForgotPasswordSubmit(e) {
+  e.preventDefault();
+  const pwd = document.getElementById("forgot-new-password")?.value || "";
+  const confirm =
+    document.getElementById("forgot-confirm-password")?.value || "";
+
+  if (pwd.length < 6) {
+    showMessage(
+      "#forgot-message",
+      "Le mot de passe doit contenir au moins 6 caracteres.",
+    );
+    return;
+  }
+  if (pwd !== confirm) {
+    showMessage("#forgot-message", "Les mots de passe ne correspondent pas.");
+    return;
+  }
+  try {
+    await waitForApi();
+    const code = document.getElementById("forgot-code-input")?.value.trim();
+    const result = await window.pywebview.api.confirm_password_reset(
+      forgotPasswordState.userId,
+      code,
+      pwd,
+    );
+    if (!result || !result.success) {
+      showMessage("#forgot-message", result?.message || "Erreur.");
+      return;
+    }
+    showMessage(
+      "#forgot-message",
+      "Mot de passe reinitialise ! Redirection...",
+      true,
+    );
+    setTimeout(() => {
+      cancelForgotPassword();
+      showMessage(
+        "#login-message",
+        "Vous pouvez maintenant vous connecter.",
+        true,
+      );
+    }, 1500);
+  } catch (err) {
+    console.error(err);
+    showMessage("#forgot-message", "Erreur de communication.");
+  }
+}

@@ -661,3 +661,21 @@ body {
     display: none;
   }
 }
+/* ============================================
+   BOUTON LIEN (mot de passe oublie)
+   ============================================ */
+.link-button {
+  background: none;
+  border: none;
+  color: var(--primary-color, #1a4d3a);
+  cursor: pointer;
+  font-size: 0.9rem;
+  text-decoration: underline;
+  padding: 0.5rem 0;
+  margin-top: 0.5rem;
+  transition: opacity 0.2s ease;
+}
+
+.link-button:hover {
+  opacity: 0.75;
+}

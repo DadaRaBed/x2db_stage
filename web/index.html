@@ -48,6 +48,13 @@
             required
           />
           <input
+            id="setup-email"
+            name="email"
+            type="email"
+            placeholder="Email (pour recuperation du mot de passe)"
+            autocomplete="email"
+          />
+          <input
             id="setup-password"
             name="password"
             type="password"
@@ -99,7 +106,99 @@
           />
           <button type="submit">Se connecter</button>
         </form>
+        <button type="button" id="forgot-password-link" class="link-button">
+          Mot de passe oublie ?
+        </button>
         <p id="login-message" class="status-message" role="alert"></p>
+      </section>
+
+      <!-- ============================================
+        PAGE : MOT DE PASSE OUBLIE
+        ============================================ -->
+      <section
+        id="forgot-password-view"
+        class="welcome-card hidden"
+        aria-labelledby="forgot-title"
+      >
+        <div class="brand-header-row">
+          <div class="brand-mark">XL</div>
+          <button
+            id="theme-toggle-forgot"
+            class="secondary-button theme-toggle-btn theme-global-btn"
+            type="button"
+          >
+            <i class="fas fa-moon"></i> Theme
+          </button>
+        </div>
+        <h1 id="forgot-title">Mot de passe oublie</h1>
+        <p id="forgot-subtitle">
+          Saisissez votre email pour recevoir un code de validation.
+        </p>
+
+        <!-- Etape 1 : email -->
+        <div id="forgot-step-email">
+          <form id="forgot-email-form">
+            <input
+              id="forgot-email-input"
+              type="email"
+              placeholder="Votre email"
+              required
+            />
+            <button type="submit">Envoyer le code</button>
+            <button type="button" id="forgot-cancel-1" class="secondary-button">
+              Annuler
+            </button>
+          </form>
+        </div>
+
+        <!-- Etape 2 : code -->
+        <div id="forgot-step-code" class="hidden">
+          <h3
+            id="forgot-user-name"
+            style="margin-bottom: 1rem; color: var(--primary-color, #1a4d3a)"
+          ></h3>
+          <form id="forgot-code-form">
+            <input
+              id="forgot-code-input"
+              type="text"
+              placeholder="Code a 6 chiffres"
+              maxlength="6"
+              required
+            />
+            <button type="submit">Verifier le code</button>
+            <button type="button" id="forgot-cancel-2" class="secondary-button">
+              Annuler
+            </button>
+          </form>
+        </div>
+
+        <!-- Etape 3 : nouveau mot de passe -->
+        <div id="forgot-step-password" class="hidden">
+          <h3
+            id="forgot-user-name-2"
+            style="margin-bottom: 1rem; color: var(--primary-color, #1a4d3a)"
+          ></h3>
+          <form id="forgot-password-form">
+            <input
+              id="forgot-new-password"
+              type="password"
+              placeholder="Nouveau mot de passe"
+              required
+            />
+            <input
+              id="forgot-confirm-password"
+              type="password"
+              placeholder="Confirmer le mot de passe"
+              required
+            />
+            <button type="submit">Reinitialiser</button>
+            <button type="button" id="forgot-cancel-3" class="secondary-button">
+              Annuler
+            </button>
+          </form>
+        </div>
+
+        <p id="forgot-message" class="status-message" role="alert"></p>
       </section>
 
       <!-- ============================================
@@ -821,10 +920,9 @@
                 <input type="radio" name="dup-algorithm" value="cin_nom" />
                 <i class="fas fa-id-card"></i> CIN + NOM + COMMUNE + FKT
               </label>
-
               <label>
                 <input type="radio" name="dup-algorithm" value="cin_nom_only" />
-                <i class="fas fa-user-tag"></i> CIN + NOM + Année de naissance
+                <i class="fas fa-user-tag"></i> CIN + NOM + Annee de naissance
               </label>
             </div>
 
@@ -1691,7 +1789,6 @@
               </div>
             </div>
 
-            <!-- ✅ NOUVEAU : barre d'outils pour les boutons de tri -->
             <div
               id="manipulate-results-toolbar"
               style="
@@ -1719,7 +1816,6 @@
                 ></i>
                 Trier par nom_et_prenoms :
               </span>
-              <!-- Les boutons seront ajoutes par sort_utils.js -->
             </div>
 
             <div
@@ -2012,7 +2108,7 @@
 
     <footer id="app-footer">
       <span
-        ><strong>xl2db</strong> v<span id="footer-version">1.0.0</span></span
+        ><strong>xl2db</strong> v<span id="footer-version">1.1.0</span></span
       >
       <span style="color: var(--border-color, #cbd5e1)">•</span>
       <button id="footer-check-updates" type="button">
@@ -2031,6 +2127,7 @@
     ></div>
 
     <script src="js/sort_utils.js"></script>
+    <script src="js/pagination_utils.js"></script>
     <script src="js/app.js"></script>
   </body>
 </html>

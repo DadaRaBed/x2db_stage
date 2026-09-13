@@ -6,6 +6,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -30,9 +31,26 @@ class UpdatesApi:
             "frozen": getattr(sys, "frozen", False),
         }
 
+    @staticmethod
+    def _has_internet(timeout: float = 3.0) -> bool:
+        for host, port in (("8.8.8.8", 53), ("1.1.1.1", 53), ("github.com", 443)):
+            try:
+                socket.create_connection((host, port), timeout=timeout).close()
+                return True
+            except OSError:
+                continue
+        return False
+
     def check_for_updates(self):
         import urllib.request
         import urllib.error
+
+        if not self._has_internet():
+            return {
+                "success": False,
+                "no_internet": True,
+                "message": "Connexion impossible : Pas de connexion internet ou reseau indisponible.",
+            }
 
         try:
             req = urllib.request.Request(
@@ -52,11 +70,15 @@ class UpdatesApi:
                         "latest_version": APP_VERSION,
                         "message": "Aucune version publiee sur GitHub pour le moment.",
                     }
-                return {"success": False, "message": f"Erreur HTTP {e.code} lors de la verification."}
-            except urllib.error.URLError as e:
-                return {"success": False, "message": f"Connexion impossible : {e.reason}"}
+                return {"success": False, "message": f"Erreur HTTP {e.code}."}
+            except urllib.error.URLError:
+                return {
+                    "success": False,
+                    "no_internet": True,
+                    "message": "Connexion impossible : Pas de connexion internet ou reseau indisponible.",
+                }
 
-            latest_version = data.get("tag_name", "").lstrip("v").strip()
+            latest_version = (data.get("tag_name") or "").lstrip("v").strip()
             if not latest_version:
                 return {"success": False, "message": "Impossible de determiner la derniere version."}
 
@@ -93,10 +115,16 @@ class UpdatesApi:
             return {"success": False, "message": f"Impossible de verifier les mises a jour : {e}"}
 
     def download_and_install_update(self, download_url: str):
-        """Telecharge et installe la mise a jour via script batch (Windows)."""
         import urllib.request
 
         try:
+            if not self._has_internet():
+                return {
+                    "success": False,
+                    "no_internet": True,
+                    "message": "Connexion impossible : Pas de connexion internet ou reseau indisponible.",
+                }
+
             if not getattr(sys, "frozen", False):
                 return {
                     "success": False,
@@ -107,7 +135,6 @@ class UpdatesApi:
             temp_dir = Path(tempfile.gettempdir())
             new_exe = temp_dir / "xl2db_new.exe"
 
-            # 1. Telecharger
             try:
                 req = urllib.request.Request(
                     download_url,
@@ -119,11 +146,9 @@ class UpdatesApi:
             except Exception as e:
                 return {"success": False, "message": f"Echec du telechargement : {e}"}
 
-            # 2. Verifier le fichier
             if not new_exe.exists() or new_exe.stat().st_size < 1_000_000:
                 return {"success": False, "message": "Le fichier telecharge est invalide."}
 
-            # 3. Creer script batch
             bat_file = temp_dir / "xl2db_update.bat"
             bat_content = f"""@echo off
 chcp 65001 > nul
@@ -140,7 +165,6 @@ del "%~f0"
             with open(bat_file, "w", encoding="utf-8") as f:
                 f.write(bat_content)
 
-            # 4. Lancer le .bat
             try:
                 subprocess.Popen(
                     ["cmd.exe", "/c", str(bat_file)],
@@ -150,7 +174,6 @@ del "%~f0"
             except Exception as e:
                 return {"success": False, "message": f"Impossible de lancer le script : {e}"}
 
-            # 5. Fermer l'app
             time.sleep(0.5)
             os._exit(0)
         except Exception as e:

@@ -1,80 +1,5 @@
 [
   {
-    "text": "Requete statistique : superficie_par_personne",
-    "date": "2026-09-10 11:42:41",
-    "user": "nabory"
-  },
-  {
-    "text": "Requete statistique : hommes_femmes",
-    "date": "2026-09-10 11:42:58",
-    "user": "nabory"
-  },
-  {
-    "text": "Requete statistique : personnes_par_filiere",
-    "date": "2026-09-10 11:43:04",
-    "user": "nabory"
-  },
-  {
-    "text": "Requete statistique : personnes_par_categorisation",
-    "date": "2026-09-10 11:43:11",
-    "user": "nabory"
-  },
-  {
-    "text": "Requete statistique : age_moyen",
-    "date": "2026-09-10 11:43:14",
-    "user": "nabory"
-  },
-  {
-    "text": "Requete statistique : superficie_totale",
-    "date": "2026-09-10 11:43:17",
-    "user": "nabory"
-  },
-  {
-    "text": "Ouverture de la base : maj_bdd_gpt_juin_2026_ttmr_ihb_zone02_vf.db",
-    "date": "2026-09-10 12:06:23",
-    "user": "nabory"
-  },
-  {
-    "text": "Requete statistique : femmes_par_tranche_age",
-    "date": "2026-09-10 12:07:31",
-    "user": "nabory"
-  },
-  {
-    "text": "Terminer la base : maj_bdd_gpt_juin_2026_ttmr_ihb_zone02_vf.db",
-    "date": "2026-09-10 12:09:03",
-    "user": "nabory"
-  },
-  {
-    "text": "Ouverture de la base : maj_bdd_gpt_juin_2026_ttmr_ihb_zone02_vf.db",
-    "date": "2026-09-10 12:16:50",
-    "user": "nabory"
-  },
-  {
-    "text": "Terminer la base : maj_bdd_gpt_juin_2026_ttmr_ihb_zone02_vf.db",
-    "date": "2026-09-10 12:17:44",
-    "user": "nabory"
-  },
-  {
-    "text": "Ouverture de la base : maj_bdd_gpt_juin_2026_ttmr_ihb_zone02_vf.db",
-    "date": "2026-09-10 12:18:31",
-    "user": "nabory"
-  },
-  {
-    "text": "Ouverture de la base : maj_bdd_gpt_juin_2026_ttmr_ihb_zone02_vf.db",
-    "date": "2026-09-10 12:22:26",
-    "user": "nabory"
-  },
-  {
-    "text": "Creation de la liste mere : 672 personne(s)",
-    "date": "2026-09-10 12:22:31",
-    "user": "nabory"
-  },
-  {
-    "text": "Export des resultats vers Excel",
-    "date": "2026-09-10 12:24:45",
-    "user": "nabory"
-  },
-  {
     "text": "Terminer la base : maj_bdd_gpt_juin_2026_ttmr_ihb_zone02_vf.db",
     "date": "2026-09-10 12:26:07",
     "user": "nabory"
@@ -497,6 +422,81 @@
   {
     "text": "Nettoyage de la base",
     "date": "2026-09-12 00:18:48",
+    "user": "nabory"
+  },
+  {
+    "text": "Ouverture de la base : maj_bdd_eaf_juin_2026_ttmr_ihb.db",
+    "date": "2026-09-12 00:53:01",
+    "user": "nabory"
+  },
+  {
+    "text": "Ouverture de la base : maj_bdd_eaf_juin_2026_ttmr_ihb.db",
+    "date": "2026-09-12 00:57:59",
+    "user": "nabory"
+  },
+  {
+    "text": "Suppression MASSIVE de 1169 doublons en 0.67s",
+    "date": "2026-09-12 01:00:06",
+    "user": "nabory"
+  },
+  {
+    "text": "Execution de COUNT sur listes_meres",
+    "date": "2026-09-12 01:01:54",
+    "user": "nabory"
+  },
+  {
+    "text": "Execution de SELECT_ALL sur listes_meres",
+    "date": "2026-09-12 01:02:20",
+    "user": "nabory"
+  },
+  {
+    "text": "Ouverture de la base : maj_bdd_eaf_juin_2026_ttmr_ihb.db",
+    "date": "2026-09-12 01:13:09",
+    "user": "nabory"
+  },
+  {
+    "text": "Ouverture de la base : maj_bdd_eaf_juin_2026_ttmr_ihb.db",
+    "date": "2026-09-12 01:27:57",
+    "user": "nabory"
+  },
+  {
+    "text": "Ouverture de la base : maj_bdd_eaf_juin_2026_ttmr_ihb.db",
+    "date": "2026-09-12 01:32:59",
+    "user": "nabory"
+  },
+  {
+    "text": "Ouverture de la base : maj_bdd_eaf_juin_2026_ttmr_ihb.db",
+    "date": "2026-09-12 01:40:18",
+    "user": "nabory"
+  },
+  {
+    "text": "Ouverture de la base : maj_bdd_eaf_juin_2026_ttmr_ihb.db",
+    "date": "2026-09-12 01:45:29",
+    "user": "nabory"
+  },
+  {
+    "text": "Ouverture de la base : maj_bdd_eaf_juin_2026_ttmr_ihb.db",
+    "date": "2026-09-12 02:02:04",
+    "user": "nabory"
+  },
+  {
+    "text": "Ouverture de la base : maj_bdd_gpt_juin_2026_ttmr_ihb_zone02_vf.db",
+    "date": "2026-09-13 12:03:41",
+    "user": "nabory"
+  },
+  {
+    "text": "Export Excel : 29 feuille(s)",
+    "date": "2026-09-13 12:04:49",
+    "user": "nabory"
+  },
+  {
+    "text": "Terminer la base : maj_bdd_gpt_juin_2026_ttmr_ihb_zone02_vf.db",
+    "date": "2026-09-13 12:10:28",
+    "user": "nabory"
+  },
+  {
+    "text": "Ouverture de la base : maj_bdd_eaf_juin_2026_ttmr_ihb.db",
+    "date": "2026-09-13 12:10:43",
     "user": "nabory"
   }
 ]

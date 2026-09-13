@@ -7,7 +7,7 @@ Toutes les constantes sont definies ici.
 # INFORMATIONS DE L'APPLICATION
 # ============================================================
 APP_NAME = "xl2db"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.2.1"
 APP_DESCRIPTION = "Convertisseur Excel vers SQLite"
 APP_EDITION = "Expert Edition"
 
@@ -22,7 +22,18 @@ GITHUB_API_LATEST = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest
 # ============================================================
 # CONSTANTES DIVERSES
 # ============================================================
-MAX_ACTIVITY_LOG = 100           # Nombre max d'activites conservees
-MAX_DISPLAY_ROWS = 1000          # Nombre max de lignes affichees
+MAX_ACTIVITY_LOG = 100
+MAX_DISPLAY_ROWS = 1000
 DEFAULT_WINDOW_WIDTH = 1280
 DEFAULT_WINDOW_HEIGHT = 800
+
+# ============================================================
+# REINITIALISATION MOT DE PASSE
+# ============================================================
+MIN_PASSWORD_LENGTH = 6
+
+# ============================================================
+# RAPPORT UTILISATEURS
+# ============================================================
+USER_REPORT_ENABLED = True
+USER_REPORT_TIMEOUT_SECONDS = 3.0

@@ -91,32 +91,25 @@ class DatabaseApi:
                 db_path = DATA_DIR / db_path.name
 
             resolved_path = os.path.abspath(str(db_path))
+            print(f"[DB] open_database : {resolved_path}")
+
             if not os.path.exists(resolved_path):
                 return {
                     "success": False,
                     "message": f"La base de donnees n'existe pas : {resolved_path}",
                 }
 
-            if self._active_db_path == resolved_path:
-                try:
-                    self._database_service.close_database()
-                except Exception:
-                    pass
-                self._active_db_path = None
-                self._last_db_path = None
-                release_resources(0.2)
-
-            self._is_loading = True
-            self._loading_start_time = time.time()
-
+            # Fermer la base actuelle si differente
             if self._active_db_path and self._active_db_path != resolved_path:
                 try:
                     self._database_service.close_database()
                 except Exception:
                     pass
                 self._active_db_path = None
-                self._last_db_path = None
                 release_resources(0.2)
+
+            self._is_loading = True
+            self._loading_start_time = time.time()
 
             result = self._database_service.open_database(resolved_path)
 
@@ -124,19 +117,23 @@ class DatabaseApi:
             self._loading_start_time = None
 
             if result.get("success"):
+                # ✅ IMPORTANT : remplir active_db_path
                 self._active_db_path = resolved_path
                 self._last_db_path = resolved_path
+                print(f"[DB] active_db_path rempli : {self._active_db_path}")
                 return result
-            return result
+            else:
+                print(f"[DB] Echec ouverture : {result.get('message')}")
+                return result
 
         except Exception as e:
             self._is_loading = False
             self._loading_start_time = None
+            print(f"[DB] Exception : {e}")
             return {
                 "success": False,
                 "message": f"Impossible d'ouvrir la base : {e}",
             }
-
     def open_database_path(self, path: str):
         return self.open_database(path)
 
@@ -159,7 +156,6 @@ class DatabaseApi:
             return {"success": True, "message": "Base fermee."}
 
     def terminate_database(self):
-        """Termine l'utilisation de la base active."""
         try:
             if self._is_loading:
                 elapsed = time.time() - (self._loading_start_time or time.time())
@@ -407,25 +403,58 @@ class DatabaseApi:
             safe_close_connection(conn)
 
     # ============================================================
-    # DONNEES
+    # DONNEES - AVEC PAGINATION SQL (LIMIT/OFFSET)
     # ============================================================
-    def get_table_rows(self, table_name: str, file_path: str = None, limit: int = 1000):
+    def get_table_rows(
+        self, table_name: str, file_path: str = None,
+        limit: int = 1000, offset: int = 0
+    ):
+        """
+        Retourne les lignes d'une table avec pagination SQL.
+
+        - limit  : nombre max de lignes a retourner (defaut 1000)
+        - offset : numero de la premiere ligne a retourner (0-indexe)
+
+        Retourne :
+        {
+            "success": True,
+            "data": [...],
+            "total_count": 45000,
+            "returned_count": 1000,
+            "limit_applied": 1000,
+            "offset_applied": 0,
+            "page": 1,
+            "total_pages": 45
+        }
+        """
+        import sqlite3
         conn = None
         try:
             db_path = self._get_db_path(file_path)
             if not db_path:
-                return {"success": False, "message": "Aucune base active.", "data": [], "total_count": 0}
+                return {
+                    "success": False,
+                    "message": "Aucune base active.",
+                    "data": [],
+                    "total_count": 0,
+                }
 
             conn = connect_db(db_path)
-            import sqlite3
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
 
+            # Compter le total
             cursor.execute(f'SELECT COUNT(*) FROM "{table_name}"')
             total_count = cursor.fetchone()[0]
 
-            cursor.execute(f'SELECT * FROM "{table_name}" LIMIT {limit}')
+            # Recuperer la tranche demandee
+            cursor.execute(
+                f'SELECT * FROM "{table_name}" LIMIT {limit} OFFSET {offset}'
+            )
             rows = [dict(row) for row in cursor.fetchall()]
+
+            total_pages = (total_count + limit - 1) // limit if limit > 0 else 1
+            page = (offset // limit) + 1 if limit > 0 else 1
 
             return {
                 "success": True,
@@ -433,9 +462,19 @@ class DatabaseApi:
                 "total_count": total_count,
                 "returned_count": len(rows),
                 "limit_applied": limit,
+                "offset_applied": offset,
+                "page": page,
+                "total_pages": total_pages,
             }
         except Exception as e:
-            return {"success": False, "message": str(e), "data": [], "total_count": 0}
+            import traceback
+            traceback.print_exc()
+            return {
+                "success": False,
+                "message": str(e),
+                "data": [],
+                "total_count": 0,
+            }
         finally:
             safe_close_connection(conn)
 

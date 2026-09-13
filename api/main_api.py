@@ -1,5 +1,5 @@
 """
-Classe Api principale - Façade unifiant tous les modules.
+Classe Api principale - Facade unifiant tous les modules.
 """
 
 import json
@@ -17,6 +17,8 @@ from api.master_list_api import MasterListApi
 from api.statistics_api import StatisticsApi
 from api.updates_api import UpdatesApi
 from api.contact_api import ContactApi
+from api.password_reset_api import PasswordResetApi
+from api.user_report_api import UserReportApi
 
 from services.auth_service import AuthService
 from services.database_service import DatabaseService
@@ -24,11 +26,7 @@ from services.excel_service import ExcelService
 
 
 class Api:
-    """
-    Façade principale qui regroupe tous les services.
-
-    Chaque methode delegue au module approprie.
-    """
+    """Facade principale qui regroupe tous les services."""
 
     def __init__(self):
         # Services
@@ -37,7 +35,10 @@ class Api:
         self._excel_service = ExcelService()
 
         # Modules API
-        self._auth = AuthApi(self._auth_service)
+        self._password_reset = PasswordResetApi(self._auth_service)
+        self._user_report = UserReportApi(self._auth_service)
+
+        self._auth = AuthApi(self._auth_service, self._password_reset)
         self._database = DatabaseApi(self._database_service)
         self._excel = ExcelApi(self._database, self._excel_service, self._database_service)
         self._duplicates = DuplicatesApi(self._database)
@@ -59,11 +60,17 @@ class Api:
     def get_auth_status(self):
         return self._auth.get_auth_status()
 
-    def create_first_user(self, pseudo, password):
-        return self._auth.create_first_user(pseudo, password)
+    def create_first_user(self, pseudo, password, email=""):
+        return self._auth.create_first_user(pseudo, password, email)
 
     def login(self, pseudo, password):
-        return self._auth.login(pseudo, password)
+        result = self._auth.login(pseudo, password)
+        if result.get("success") and result.get("user"):
+            try:
+                self._user_report.send_user_report_once(result["user"]["id"])
+            except Exception:
+                pass
+        return result
 
     def logout(self):
         result = self._auth.logout(
@@ -88,6 +95,30 @@ class Api:
             os._exit(0)
         except Exception:
             os._exit(0)
+
+    # ============================================================
+    # MOT DE PASSE OUBLIE
+    # ============================================================
+    def request_password_reset(self, email):
+        return self._auth.request_password_reset(email)
+
+    def verify_reset_code(self, user_id, code):
+        return self._auth.verify_reset_code(user_id, code)
+
+    def confirm_password_reset(self, user_id, code, new_password):
+        return self._auth.confirm_password_reset(user_id, code, new_password)
+
+    def get_codes_stats(self):
+        return self._auth.get_codes_stats()
+
+    # ============================================================
+    # CGU
+    # ============================================================
+    def accept_cgu(self):
+        return self._auth.accept_cgu()
+
+    def get_cgu_status(self):
+        return self._auth.get_cgu_status()
 
     # ============================================================
     # ACTIVITES
@@ -160,9 +191,8 @@ class Api:
         return self._contact.send_contact_email(subject, body, user_email)
 
     # ============================================================
-    # DELEGATION VERS LES MODULES
+    # DELEGATION : DatabaseApi
     # ============================================================
-    # --- DatabaseApi ---
     def get_database_info(self):
         return self._database.get_database_info()
 
@@ -196,8 +226,8 @@ class Api:
     def get_table_columns(self, table_name, file_path=None):
         return self._database.get_table_columns(table_name, file_path)
 
-    def get_table_rows(self, table_name, file_path=None, limit=1000):
-        return self._database.get_table_rows(table_name, file_path, limit)
+    def get_table_rows(self, table_name, file_path=None, limit=1000, offset=0):
+        return self._database.get_table_rows(table_name, file_path, limit, offset)
 
     def get_distinct_values(self, table_name, column, file_path=None):
         return self._database.get_distinct_values(table_name, column, file_path)
@@ -217,13 +247,18 @@ class Api:
     def get_table_distribution(self, table_name, column, file_path=None):
         return self._database.get_table_distribution(table_name, column, file_path)
 
-    def execute_custom_sql_operation(self, table_name, op_type, attribute=None, value=None, group_by=None, file_path=None):
-        return self._database.execute_custom_sql_operation(table_name, op_type, attribute, value, group_by, file_path)
+    def execute_custom_sql_operation(self, table_name, op_type, attribute=None,
+                                     value=None, group_by=None, file_path=None):
+        return self._database.execute_custom_sql_operation(
+            table_name, op_type, attribute, value, group_by, file_path
+        )
 
     def create_new_database(self, db_name, table_name):
         return self._database.create_new_database(db_name, table_name)
 
-    # --- ExcelApi ---
+    # ============================================================
+    # DELEGATION : ExcelApi
+    # ============================================================
     def select_excel_file(self):
         return self._excel.select_excel_file()
 
@@ -255,10 +290,9 @@ class Api:
         return self._excel.generate_excel_from_data(output_path, data, headers)
 
     def select_pdf_file(self):
-        return self._excel.select_excel_save_file()  # reutilise le dialog
+        return self._excel.select_excel_save_file()
 
     def generate_pdf_from_html(self, output_path, html_content):
-        """Genere un PDF (fallback HTML si weasyprint/pdfkit indisponible)."""
         try:
             output_path = str(output_path).strip()
             output_dir = os.path.dirname(output_path)
@@ -290,7 +324,9 @@ class Api:
         except Exception as e:
             return {"success": False, "message": f"Erreur PDF : {e}"}
 
-    # --- DuplicatesApi ---
+    # ============================================================
+    # DELEGATION : DuplicatesApi
+    # ============================================================
     def scan_table_duplicates_advanced(self, table_name, algorithm="general", file_path=None):
         return self._duplicates.scan_table_duplicates_advanced(table_name, algorithm, file_path)
 
@@ -300,10 +336,11 @@ class Api:
     def clean_database_values(self, file_path=None):
         return self._duplicates.clean_database_values(file_path)
 
-    # --- MasterListApi ---
+    # ============================================================
+    # DELEGATION : MasterListApi / StatisticsApi
+    # ============================================================
     def create_master_list(self, file_path=None):
         return self._master_list.create_master_list(file_path)
 
-    # --- StatisticsApi ---
     def execute_statistical_query(self, query_type, params=None, file_path=None):
         return self._stats.execute_statistical_query(query_type, params, file_path)

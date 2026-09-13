@@ -2,22 +2,34 @@
 Import et export Excel.
 """
 
+import os
+import re
+import unicodedata
 import warnings
+from pathlib import Path
+from typing import List, Dict, Any
 
+import pandas as pd
+
+# ============================================================
+# SUPPRESSION DES AVERTISSEMENTS
+# ============================================================
 warnings.filterwarnings(
     "ignore",
     message="Cell .* is marked as a date but the serial value .* is outside",
     category=UserWarning,
     module="openpyxl",
 )
-
-import os
-import unicodedata
-import re
-from pathlib import Path
-from typing import List, Dict, Any
-
-import pandas as pd
+warnings.filterwarnings(
+    "ignore",
+    message="Downcasting object dtype arrays on .fillna",
+    category=FutureWarning,
+    module="pandas",
+)
+try:
+    pd.set_option("future.no_silent_downcasting", True)
+except Exception:
+    pass
 
 from paths import DATA_DIR, get_app_window
 from api.utils import connect_db, safe_close_connection, release_resources, clean_ascii
@@ -179,7 +191,7 @@ class ExcelApi:
                                 df[col] = pd.to_datetime(df[col]).dt.date
                                 df[col] = df[col].fillna(pd.Timestamp.now().date())
                             else:
-                                df[col] = df[col].fillna("Non specifie").infer_objects(copy=False)
+                                df[col] = df[col].fillna("Non specifie")
 
                         df.columns = [clean_ascii(str(col)) or "col" for col in df.columns]
                         df.to_sql(clean_table_name, conn, if_exists="replace", index=False)
@@ -205,6 +217,8 @@ class ExcelApi:
                 "open_result": open_result,
             }
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             return {"success": False, "message": f"Erreur lors de la conversion : {e}"}
 
     def create_database_from_excel(self, file_path: str, db_name: str = None):
@@ -278,7 +292,7 @@ class ExcelApi:
             worksheet.auto_filter.ref = f"A1:{get_column_letter(max_col)}{max_row}"
 
             header_font = Font(bold=True, color="FFFFFF", size=11)
-            header_fill = PatternFill(start_color="4F46E5", end_color="4F46E5", fill_type="solid")
+            header_fill = PatternFill(start_color="1A4D3A", end_color="1A4D3A", fill_type="solid")
             header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
             thin_border = Border(
                 left=Side(style="thin", color="E2E8F0"),
@@ -295,7 +309,7 @@ class ExcelApi:
                 cell.border = thin_border
 
             alt_fill_1 = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
-            alt_fill_2 = PatternFill(start_color="F8FAFC", end_color="F8FAFC", fill_type="solid")
+            alt_fill_2 = PatternFill(start_color="F0F7F4", end_color="F0F7F4", fill_type="solid")
             cell_alignment = Alignment(vertical="center", wrap_text=False)
 
             for row_idx in range(2, max_row + 1):
@@ -334,40 +348,61 @@ class ExcelApi:
         - Les attributs deviennent les en-tetes
         - AutoFilter + mise en forme
         """
+        import traceback
+
+        print(f"[EXPORT_FROM_PATH] debut")
+        print(f"[EXPORT_FROM_PATH] db_path : {db_path}")
+        print(f"[EXPORT_FROM_PATH] output  : {output_excel_path}")
+
+        conn = None
         try:
-            if not db_path or not os.path.exists(db_path):
-                return {"success": False, "message": "Base de donnees introuvable."}
+            # Verification 1 : db_path
+            if not db_path:
+                return {"success": False, "message": "Le chemin de la base est vide."}
 
+            if not os.path.exists(db_path):
+                return {"success": False, "message": f"Base introuvable : {db_path}"}
+
+            # Verification 2 : output_excel_path
             if not output_excel_path or not str(output_excel_path).strip():
-                return {"success": False, "message": "Le chemin de sortie est requis."}
+                return {"success": False, "message": "Le chemin de sortie est vide."}
 
+            output_excel_path = str(output_excel_path).strip()
+
+            # Creer le dossier si necessaire
             output_dir = os.path.dirname(output_excel_path)
             if output_dir and not os.path.exists(output_dir):
                 os.makedirs(output_dir, exist_ok=True)
 
+            # Connexion
             conn = connect_db(db_path)
-            try:
-                cursor = conn.cursor()
-                cursor.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';"
-                )
-                tables = [row[0] for row in cursor.fetchall() if row[0] != "sqlite_sequence"]
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';"
+            )
+            tables = [row[0] for row in cursor.fetchall() if row[0] != "sqlite_sequence"]
 
-                if not tables:
-                    return {"success": False, "message": "Aucune table dans cette base."}
+            print(f"[EXPORT_FROM_PATH] tables trouvees : {tables}")
 
-                tables_ordered = [t for t in tables if t != "listes_meres"]
-                if "listes_meres" in tables:
-                    tables_ordered.append("listes_meres")
+            if not tables:
+                return {"success": False, "message": "Aucune table dans cette base."}
 
-                tables_exported = []
-                total_rows_exported = 0
+            tables_ordered = [t for t in tables if t != "listes_meres"]
+            if "listes_meres" in tables:
+                tables_ordered.append("listes_meres")
 
-                with pd.ExcelWriter(output_excel_path, engine="openpyxl") as writer:
-                    for table in tables_ordered:
+            tables_exported = []
+            total_rows_exported = 0
+
+            with pd.ExcelWriter(output_excel_path, engine="openpyxl") as writer:
+                for table in tables_ordered:
+                    try:
+                        print(f"[EXPORT_FROM_PATH] table '{table}' en cours...")
                         df = pd.read_sql_query(f'SELECT * FROM "{table}"', conn)
+
                         if "id" in df.columns:
                             df = df.drop(columns=["id"])
+
                         for col in df.columns:
                             if pd.api.types.is_datetime64_any_dtype(df[col]):
                                 df[col] = df[col].dt.date
@@ -377,24 +412,78 @@ class ExcelApi:
                         self._apply_professional_formatting(writer, sheet_name, df)
                         tables_exported.append(sheet_name)
                         total_rows_exported += len(df)
+                        print(f"[EXPORT_FROM_PATH] table '{table}' : {len(df)} lignes exportees")
+                    except Exception as e:
+                        print(f"[EXPORT_FROM_PATH] ERREUR table '{table}' : {e}")
+                        traceback.print_exc()
+                        continue
 
-                return {
-                    "success": True,
-                    "message": f"Exportation reussie : {len(tables_exported)} feuille(s) ({total_rows_exported} lignes).",
-                    "tables_exported": tables_exported,
-                    "total_rows": total_rows_exported,
-                    "output_path": output_excel_path,
-                }
-            finally:
-                safe_close_connection(conn)
+            print(f"[EXPORT_FROM_PATH] TERMINE : {len(tables_exported)} feuille(s)")
+
+            return {
+                "success": True,
+                "message": f"Exportation reussie : {len(tables_exported)} feuille(s) ({total_rows_exported} lignes).",
+                "tables_exported": tables_exported,
+                "total_rows": total_rows_exported,
+                "output_path": output_excel_path,
+            }
         except Exception as e:
+            traceback.print_exc()
             return {"success": False, "message": f"Erreur lors de l'export Excel : {e}"}
+        finally:
+            safe_close_connection(conn)
 
     def export_database_to_excel(self, output_excel_path: str, file_path: str = None):
-        db_path = self._database_api._get_db_path(file_path)
-        if not db_path:
-            return {"success": False, "message": "Aucune base active."}
-        return self.export_database_to_excel_from_path(db_path, output_excel_path)
+        """
+        Export professionnel de la base active vers Excel.
+        Accepte file_path (chemin de la base) OU utilise active_db_path.
+        """
+        import traceback
+
+        print(f"[EXPORT] === DEBUT EXPORT ===")
+        print(f"[EXPORT] output_excel_path : {output_excel_path}")
+        print(f"[EXPORT] file_path         : {file_path}")
+
+        try:
+            # Verification 1 : output
+            if not output_excel_path or not str(output_excel_path).strip():
+                return {"success": False, "message": "Le chemin de sortie est vide."}
+
+            # Verification 2 : trouver la base
+            db_path = None
+
+            if file_path and os.path.exists(file_path):
+                db_path = file_path
+                print(f"[EXPORT] db_path via file_path : {db_path}")
+            else:
+                db_path = self._database_api._get_db_path(file_path)
+                print(f"[EXPORT] db_path via _get_db_path : {db_path}")
+
+            # Fallback : active_db_path direct
+            if not db_path:
+                db_path = self._database_api.active_db_path
+                print(f"[EXPORT] db_path via active_db_path : {db_path}")
+
+            if not db_path:
+                return {
+                    "success": False,
+                    "message": "Aucune base active. Veuillez ouvrir une base avant d'exporter.",
+                }
+
+            if not os.path.exists(db_path):
+                return {
+                    "success": False,
+                    "message": f"La base n'existe pas : {db_path}",
+                }
+
+            # Delegation
+            result = self.export_database_to_excel_from_path(db_path, output_excel_path)
+            print(f"[EXPORT] Resultat : {result}")
+            return result
+
+        except Exception as e:
+            traceback.print_exc()
+            return {"success": False, "message": f"Erreur lors de l'export : {e}"}
 
     def generate_excel_from_data(self, output_path: str, data: List[dict], headers: List[str] = None):
         try:
