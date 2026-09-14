@@ -152,24 +152,33 @@
         </div>
 
         <!-- Etape 2 : code -->
+        <!-- Etape 2 : code -->
         <div id="forgot-step-code" class="hidden">
-          <h3
-            id="forgot-user-name"
-            style="margin-bottom: 1rem; color: var(--primary-color, #1a4d3a)"
-          ></h3>
-          <form id="forgot-code-form">
-            <input
-              id="forgot-code-input"
-              type="text"
-              placeholder="Code a 6 chiffres"
-              maxlength="6"
-              required
-            />
-            <button type="submit">Verifier le code</button>
-            <button type="button" id="forgot-cancel-2" class="secondary-button">
-              Annuler
-            </button>
-          </form>
+        <h3
+        id="forgot-user-name"
+        style="margin-bottom: 1rem; color: var(--primary-color, #1a4d3a)"
+        ></h3>
+        <form id="forgot-code-form">
+        <input
+        id="forgot-code-input"
+        type="text"
+        placeholder="Code a 6 chiffres recu par email"
+        maxlength="6"
+        inputmode="numeric"
+        autocomplete="off"
+        required
+        style="
+        text-align: center;
+        font-size: 1.4rem;
+        letter-spacing: 8px;
+        font-family: 'Courier New', monospace;
+        "
+        />
+        <button type="submit">Verifier le code</button>
+        <button type="button" id="forgot-cancel-2" class="secondary-button">
+        Annuler
+        </button>
+        </form>
         </div>
 
         <!-- Etape 3 : nouveau mot de passe -->

@@ -37,7 +37,7 @@ def main():
     #    (C'est cette ligne qui rend la fenetre disponible a l'API)
     set_app_window(window)
     
-    webview.start()
+    webview.start(debug=True)
 
 
 if __name__ == "__main__":
