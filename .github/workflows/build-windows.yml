@@ -25,7 +25,7 @@ jobs:
           pip install pyinstaller
 
       - name: Build with PyInstaller
-        run: pyinstaller xl2db.spec
+        run: pyinstaller build.spec -- --onefile
 
       - name: Upload EXE artifact
         uses: actions/upload-artifact@v4
