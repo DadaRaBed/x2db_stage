@@ -407,26 +407,9 @@ class DatabaseApi:
     # ============================================================
     def get_table_rows(
         self, table_name: str, file_path: str = None,
-        limit: int = 1000, offset: int = 0
+        limit: int = 1000, offset: int = 0,
+        order_by: str = None, order_dir: str = "ASC",
     ):
-        """
-        Retourne les lignes d'une table avec pagination SQL.
-
-        - limit  : nombre max de lignes a retourner (defaut 1000)
-        - offset : numero de la premiere ligne a retourner (0-indexe)
-
-        Retourne :
-        {
-            "success": True,
-            "data": [...],
-            "total_count": 45000,
-            "returned_count": 1000,
-            "limit_applied": 1000,
-            "offset_applied": 0,
-            "page": 1,
-            "total_pages": 45
-        }
-        """
         import sqlite3
         conn = None
         try:
@@ -435,21 +418,29 @@ class DatabaseApi:
                 return {
                     "success": False,
                     "message": "Aucune base active.",
-                    "data": [],
-                    "total_count": 0,
+                    "data": [], "total_count": 0,
                 }
 
             conn = connect_db(db_path)
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
 
-            # Compter le total
-            cursor.execute(f'SELECT COUNT(*) FROM "{table_name}"')
+            # Securiser le nom de table
+            safe_table = str(table_name).replace('"', '""')
+
+            # Total
+            cursor.execute(f'SELECT COUNT(*) FROM "{safe_table}"')
             total_count = cursor.fetchone()[0]
 
-            # Recuperer la tranche demandee
+            # Trier par colonne si demandee
+            order_clause = ""
+            if order_by:
+                safe_col = str(order_by).replace('"', '""')
+                safe_dir = "ASC" if str(order_dir).upper() != "DESC" else "DESC"
+                order_clause = f'ORDER BY "{safe_col}" {safe_dir}'
+
             cursor.execute(
-                f'SELECT * FROM "{table_name}" LIMIT {limit} OFFSET {offset}'
+                f'SELECT * FROM "{safe_table}" {order_clause} LIMIT {limit} OFFSET {offset}'
             )
             rows = [dict(row) for row in cursor.fetchall()]
 
@@ -465,6 +456,8 @@ class DatabaseApi:
                 "offset_applied": offset,
                 "page": page,
                 "total_pages": total_pages,
+                "order_by": order_by,
+                "order_dir": order_dir,
             }
         except Exception as e:
             import traceback
@@ -472,8 +465,7 @@ class DatabaseApi:
             return {
                 "success": False,
                 "message": str(e),
-                "data": [],
-                "total_count": 0,
+                "data": [], "total_count": 0,
             }
         finally:
             safe_close_connection(conn)

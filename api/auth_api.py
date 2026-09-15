@@ -141,3 +141,13 @@ class AuthApi:
             return {"success": True, "accepted": accepted}
         except Exception as e:
             return {"success": False, "accepted": False, "message": str(e)}
+        
+    def change_password(self, old_password: str, new_password: str):
+        if not self.current_user:
+            return {"success": False, "message": "Aucun utilisateur connecte."}
+        try:
+            return self._auth_service.change_password(
+                self.current_user["id"], old_password, new_password
+            )
+        except Exception as e:
+            return {"success": False, "message": f"Erreur : {e}"}

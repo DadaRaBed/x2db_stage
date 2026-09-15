@@ -1,170 +1,5 @@
 [
   {
-    "text": "Ouverture de la base : maj_bdd_gpt_juin_2026_ttmr_ihb_zone02_vf.db",
-    "date": "2026-09-10 13:52:00",
-    "user": "nabory"
-  },
-  {
-    "text": "Suppression de la table : listes_meres",
-    "date": "2026-09-10 13:52:31",
-    "user": "nabory"
-  },
-  {
-    "text": "Creation de la liste mere : 639 personne(s)",
-    "date": "2026-09-10 13:52:42",
-    "user": "nabory"
-  },
-  {
-    "text": "Execution de SELECT_ALL sur appui_ttmk_kmm",
-    "date": "2026-09-10 13:59:09",
-    "user": "nabory"
-  },
-  {
-    "text": "Ouverture de la base : test_doublons_complexite.db",
-    "date": "2026-09-10 14:15:00",
-    "user": "nabory"
-  },
-  {
-    "text": "Export des doublons vers PDF : /home/nabory/Desktop/hello.pdf",
-    "date": "2026-09-10 14:17:11",
-    "user": "nabory"
-  },
-  {
-    "text": "Export des doublons vers PDF : /home/nabory/Desktop/hello.pdf",
-    "date": "2026-09-10 14:18:51",
-    "user": "nabory"
-  },
-  {
-    "text": "Terminer la base : test_doublons_complexite.db",
-    "date": "2026-09-10 14:25:09",
-    "user": "nabory"
-  },
-  {
-    "text": "Ouverture de la base : maj_bdd_eaf_juin_2026_ttmr_ihb.db",
-    "date": "2026-09-10 14:32:24",
-    "user": "nabory"
-  },
-  {
-    "text": "Terminer la base : maj_bdd_eaf_juin_2026_ttmr_ihb.db",
-    "date": "2026-09-10 14:32:30",
-    "user": "nabory"
-  },
-  {
-    "text": "Ouverture de la base : maj_bdd_eaf__juin_2026_zone_01_ttmr_ihb_v1.db",
-    "date": "2026-09-10 14:32:36",
-    "user": "nabory"
-  },
-  {
-    "text": "Terminer la base : maj_bdd_eaf__juin_2026_zone_01_ttmr_ihb_v1.db",
-    "date": "2026-09-10 14:38:03",
-    "user": "nabory"
-  },
-  {
-    "text": "Ouverture de la base : maj_bdd_eaf_juin_2026_ttmr_ihb.db",
-    "date": "2026-09-10 14:38:16",
-    "user": "nabory"
-  },
-  {
-    "text": "Creation de la liste mere : 43652 personne(s)",
-    "date": "2026-09-10 14:45:41",
-    "user": "nabory"
-  },
-  {
-    "text": "Terminer la base : maj_bdd_eaf_juin_2026_ttmr_ihb.db",
-    "date": "2026-09-10 14:47:51",
-    "user": "nabory"
-  },
-  {
-    "text": "Suppression de la base : maj_bdd_gpt_juin_2026_ttmr_ihb_zone02_vf.db",
-    "date": "2026-09-10 18:26:47",
-    "user": "nabory"
-  },
-  {
-    "text": "Ouverture de la base : maj_bdd_gpt_juin_2026_ttmr_ihb_zone02_vf.db",
-    "date": "2026-09-10 18:27:57",
-    "user": "nabory"
-  },
-  {
-    "text": "Terminer la base : maj_bdd_gpt_juin_2026_ttmr_ihb_zone02_vf.db",
-    "date": "2026-09-10 18:33:07",
-    "user": "nabory"
-  },
-  {
-    "text": "Ouverture de la base : maj_bdd_eaf_juin_2026_ttmr_ihb.db",
-    "date": "2026-09-11 08:50:58",
-    "user": "nabory"
-  },
-  {
-    "text": "Ouverture de la base : maj_bdd_eaf_juin_2026_ttmr_ihb.db",
-    "date": "2026-09-11 08:50:59",
-    "user": "nabory"
-  },
-  {
-    "text": "Terminer la base : maj_bdd_eaf_juin_2026_ttmr_ihb.db",
-    "date": "2026-09-11 09:33:31",
-    "user": "nabory"
-  },
-  {
-    "text": "Ouverture de la base : maj_bdd_eaf__juin_2026_zone_01_ttmr_ihb_v1.db",
-    "date": "2026-09-11 09:39:14",
-    "user": "nabory"
-  },
-  {
-    "text": "Creation de la liste mere : 26074 personne(s)",
-    "date": "2026-09-11 09:39:52",
-    "user": "nabory"
-  },
-  {
-    "text": "Ouverture de la base : maj_bdd_eaf_juin_2026_ttmr_ihb.db",
-    "date": "2026-09-11 09:44:53",
-    "user": "nabory"
-  },
-  {
-    "text": "Terminer la base : maj_bdd_eaf_juin_2026_ttmr_ihb.db",
-    "date": "2026-09-11 09:46:58",
-    "user": "nabory"
-  },
-  {
-    "text": "Ouverture de la base : maj_bdd_eaf_juin_2026_ttmr_ihb.db",
-    "date": "2026-09-11 09:47:58",
-    "user": "nabory"
-  },
-  {
-    "text": "Terminer la base : maj_bdd_eaf_juin_2026_ttmr_ihb.db",
-    "date": "2026-09-11 10:01:45",
-    "user": "nabory"
-  },
-  {
-    "text": "Ouverture de la base : maj_bdd_eaf_juin_2026_ttmr_ihb.db",
-    "date": "2026-09-11 10:02:06",
-    "user": "nabory"
-  },
-  {
-    "text": "Suppression de la table : listes_meres",
-    "date": "2026-09-11 10:02:41",
-    "user": "nabory"
-  },
-  {
-    "text": "Creation de la liste mere : 72744 personne(s)",
-    "date": "2026-09-11 10:03:10",
-    "user": "nabory"
-  },
-  {
-    "text": "Execution de COUNT sur listes_meres",
-    "date": "2026-09-11 10:05:52",
-    "user": "nabory"
-  },
-  {
-    "text": "Ouverture de la base : maj_bdd_eaf_juin_2026_ttmr_ihb.db",
-    "date": "2026-09-11 10:21:19",
-    "user": "nabory"
-  },
-  {
-    "text": "Terminer la base : maj_bdd_eaf_juin_2026_ttmr_ihb.db",
-    "date": "2026-09-11 12:04:04",
-    "user": "nabory"
-  },
-  {
     "text": "Ouverture de la base : maj_bdd_eaf__juin_2026_zone_01_ttmr_ihb_v1.db",
     "date": "2026-09-11 12:04:57",
     "user": "nabory"
@@ -497,6 +332,171 @@
   {
     "text": "Execution de WHERE_LIKE sur listes_meres",
     "date": "2026-09-15 07:07:15",
+    "user": "nabory"
+  },
+  {
+    "text": "Ouverture de la base : maj_bdd_eaf_juin_2026_ttmr_ihb.db",
+    "date": "2026-09-15 10:05:46",
+    "user": "nabory"
+  },
+  {
+    "text": "Suppression de la base : maj_bdd_eaf_juin_2026_ttmr_ihb.db",
+    "date": "2026-09-15 10:12:50",
+    "user": "nabory"
+  },
+  {
+    "text": "Ouverture de la base : maj_bdd_eaf_juin_2026_ttmr_ihb.db",
+    "date": "2026-09-15 10:14:18",
+    "user": "nabory"
+  },
+  {
+    "text": "Ouverture de la base : maj_bdd_eaf_juin_2026_ttmr_ihb.db",
+    "date": "2026-09-15 10:19:38",
+    "user": "nabory"
+  },
+  {
+    "text": "Creation de la liste mere : 78656 personne(s)",
+    "date": "2026-09-15 10:20:04",
+    "user": "nabory"
+  },
+  {
+    "text": "Suppression MASSIVE de 4264 doublons en 0.05s",
+    "date": "2026-09-15 10:23:46",
+    "user": "nabory"
+  },
+  {
+    "text": "Suppression MASSIVE de 42262 doublons en 1.33s",
+    "date": "2026-09-15 10:24:57",
+    "user": "nabory"
+  },
+  {
+    "text": "Suppression MASSIVE de 2110 doublons en 0.02s",
+    "date": "2026-09-15 10:26:04",
+    "user": "nabory"
+  },
+  {
+    "text": "Ouverture de la base : maj_bdd_eaf_juin_2026_ttmr_ihb.db",
+    "date": "2026-09-15 10:42:00",
+    "user": "nabory"
+  },
+  {
+    "text": "Suppression de la ligne #74344 dans listes_meres",
+    "date": "2026-09-15 10:45:27",
+    "user": "nabory"
+  },
+  {
+    "text": "Suppression de la table : listes_meres",
+    "date": "2026-09-15 10:46:26",
+    "user": "nabory"
+  },
+  {
+    "text": "Creation de la liste mere : 78656 personne(s)",
+    "date": "2026-09-15 10:46:58",
+    "user": "nabory"
+  },
+  {
+    "text": "Suppression MASSIVE de 44147 doublons en 0.29s",
+    "date": "2026-09-15 10:48:39",
+    "user": "nabory"
+  },
+  {
+    "text": "Suppression MASSIVE de 2241 doublons en 0.07s",
+    "date": "2026-09-15 10:49:16",
+    "user": "nabory"
+  },
+  {
+    "text": "Suppression MASSIVE de 2268 doublons en 0.08s",
+    "date": "2026-09-15 10:49:49",
+    "user": "nabory"
+  },
+  {
+    "text": "Suppression MASSIVE de 2 doublons en 0.01s",
+    "date": "2026-09-15 10:50:31",
+    "user": "nabory"
+  },
+  {
+    "text": "Ouverture de la base : maj_bdd_eaf_juin_2026_ttmr_ihb.db",
+    "date": "2026-09-15 11:09:02",
+    "user": "nabory"
+  },
+  {
+    "text": "Ouverture de la base : maj_bdd_eaf_juin_2026_ttmr_ihb.db",
+    "date": "2026-09-15 11:13:18",
+    "user": "nabory"
+  },
+  {
+    "text": "Ouverture de la base : maj_bdd_eaf_juin_2026_ttmr_ihb.db",
+    "date": "2026-09-15 11:15:40",
+    "user": "nabory"
+  },
+  {
+    "text": "Suppression MASSIVE de 1883 doublons en 0.82s",
+    "date": "2026-09-15 11:16:37",
+    "user": "nabory"
+  },
+  {
+    "text": "Ouverture de la base : maj_bdd_eaf_juin_2026_ttmr_ihb.db",
+    "date": "2026-09-15 12:11:49",
+    "user": "nabory"
+  },
+  {
+    "text": "Suppression de la base : maj_bdd_eaf_juin_2026_ttmr_ihb.db",
+    "date": "2026-09-15 13:59:30",
+    "user": "nabory"
+  },
+  {
+    "text": "Ouverture de la base : maj_bdd_eaf_juin_2026_ttmr_ihb.db",
+    "date": "2026-09-15 14:00:53",
+    "user": "nabory"
+  },
+  {
+    "text": "Creation liste mere : 78656 personne(s)",
+    "date": "2026-09-15 14:01:52",
+    "user": "nabory"
+  },
+  {
+    "text": "Suppression MASSIVE de 45356 doublons en 4.31s",
+    "date": "2026-09-15 14:05:55",
+    "user": "nabory"
+  },
+  {
+    "text": "Suppression MASSIVE de 2998 doublons en 0.1s",
+    "date": "2026-09-15 14:06:58",
+    "user": "nabory"
+  },
+  {
+    "text": "Suppression MASSIVE de 2228 doublons en 0.12s",
+    "date": "2026-09-15 14:07:47",
+    "user": "nabory"
+  },
+  {
+    "text": "Nettoyage de la base : 42 table(s)",
+    "date": "2026-09-15 14:09:27",
+    "user": "nabory"
+  },
+  {
+    "text": "Nettoyage de la base : 42 table(s)",
+    "date": "2026-09-15 14:09:32",
+    "user": "nabory"
+  },
+  {
+    "text": "Execution de WHERE_LIKE sur listes_meres",
+    "date": "2026-09-15 14:11:55",
+    "user": "nabory"
+  },
+  {
+    "text": "Ouverture de la base : maj_bdd_eaf_juin_2026_ttmr_ihb.db",
+    "date": "2026-09-15 14:39:29",
+    "user": "nabory"
+  },
+  {
+    "text": "Ouverture de la base : maj_bdd_eaf_juin_2026_ttmr_ihb.db",
+    "date": "2026-09-15 14:57:14",
+    "user": "nabory"
+  },
+  {
+    "text": "Terminer la base : maj_bdd_eaf_juin_2026_ttmr_ihb.db",
+    "date": "2026-09-15 14:57:33",
     "user": "nabory"
   }
 ]

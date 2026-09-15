@@ -46,6 +46,8 @@ class DuplicatesApi:
                 return self._scan_cin_nom_only(conn, table_name, columns)
             elif algorithm == "cin_nom_annee_commune_fkt":
                 return self._scan_cin_nom_annee_commune_fkt(conn, table_name, columns)
+            elif algorithm == "cin_nom_annee_commune_fkt_residence":
+                return self._scan_cin_nom_annee_commune_fkt_residence(conn, table_name, columns)
             else:
                 return {"success": True, "duplicates": []}
         except Exception as e:
@@ -234,12 +236,6 @@ class DuplicatesApi:
     def _scan_cin_nom_only(self, conn, table_name, columns):
         """
         Detecte les doublons sur la base du CIN + NOM + ANNEE DE NAISSANCE.
-
-        Regles :
-        - Le CIN doit etre rempli (>= 3 caracteres)
-        - Le NOM doit etre rempli
-        - L'annee de naissance doit etre remplie et valide
-        - Cle unique = CIN + NOM + ANNEE_NAISSANCE
         """
         df = pd.read_sql_query(
             f'SELECT rowid AS __sqlite_rowid__, * FROM "{table_name}"', conn,
@@ -296,7 +292,6 @@ class DuplicatesApi:
         df["_cin_clean"] = df["_cin_clean"].str.replace(r"[^A-Z0-9]", "", regex=True)
         df["_nom_clean"] = df[nom_col].fillna("").astype(str).str.upper().str.strip()
 
-        # Normaliser l'annee : extraire uniquement les 4 chiffres
         def normalize_annee(val):
             if val is None or pd.isna(val):
                 return ""
@@ -387,8 +382,6 @@ class DuplicatesApi:
         """
         Detecte les doublons stricts sur 5 criteres :
         CIN + NOM + ANNEE DE NAISSANCE + COMMUNE + FKT
-
-        Tous les 5 champs doivent etre remplis et identiques.
         """
         df = pd.read_sql_query(
             f'SELECT rowid AS __sqlite_rowid__, * FROM "{table_name}"', conn,
@@ -521,6 +514,252 @@ class DuplicatesApi:
                 processed.add(row["rowid"])
 
         return {"success": True, "duplicates": duplicates, "algorithm": "cin_nom_annee_commune_fkt"}
+
+    # ============================================================
+    # ALGO 5 : CIN + NOM + ANNEE + COMMUNE + FKT (avec regle residence)
+    # ============================================================
+    def _scan_cin_nom_annee_commune_fkt_residence(self, conn, table_name, columns):
+        """
+        Detecte les doublons sur 5 criteres avec une regle speciale sur le CIN :
+        - nom_et_prenoms
+        - fkt
+        - commune
+        - annee_de_naissance
+        - cin (avec regle speciale)
+
+        Regle CIN : deux CIN sont compatibles si :
+        - Ils sont identiques (apres normalisation), OU
+        - Au moins un des deux est vide ou vaut "residence"
+
+        Deux CIN sont INCOMPATIBLES uniquement si :
+        - Les deux sont des vrais CIN differents (ni vide, ni "residence")
+
+        Reference stricte : la premiere ligne du groupe sert de reference.
+        Seules les lignes compatibles avec la reference sont marquees comme doublons.
+        """
+        df = pd.read_sql_query(
+            f'SELECT rowid AS __sqlite_rowid__, * FROM "{table_name}"', conn,
+        )
+        if df.empty:
+            return {
+                "success": True,
+                "duplicates": [],
+                "algorithm": "cin_nom_annee_commune_fkt_residence",
+            }
+
+        # --- Detection des colonnes ---
+        cin_col = None
+        nom_col = None
+        commune_col = None
+        fkt_col = None
+        annee_col = None
+
+        cin_patterns = ["cin", "nin", "nif", "id_personne", "num", "numero", "matricule"]
+        commune_patterns = ["commune", "comm", "ville", "city"]
+        fkt_patterns = ["fkt", "fokontany", "localite", "lieu", "village"]
+        annee_patterns = ["annee", "année", "naissance", "birth", "date_naiss", "date_naissance"]
+
+        # Nom et prenoms : STRICT (uniquement nom_et_prenoms et variantes)
+        NOM_VARIANTS = {
+            "nom_et_prenoms",
+            "nom_et_prenom",
+            "noms_et_prenoms",
+            "noms_et_prenom",
+            "nom_prenoms",
+            "nom_prenom",
+        }
+
+        for col in columns:
+            cl = col.lower()
+            cl_norm = cl.replace(" ", "_").replace("-", "_")
+            while "__" in cl_norm:
+                cl_norm = cl_norm.replace("__", "_")
+            cl_norm = cl_norm.strip("_")
+
+            if not cin_col and any(p in cl for p in cin_patterns):
+                cin_col = col
+            if not nom_col and cl_norm in NOM_VARIANTS:
+                nom_col = col
+            if not commune_col and any(p in cl for p in commune_patterns):
+                commune_col = col
+            if not fkt_col and any(p in cl for p in fkt_patterns):
+                fkt_col = col
+            if not annee_col and any(p in cl for p in annee_patterns):
+                annee_col = col
+
+        # --- Verifications ---
+        missing = []
+        if not cin_col:
+            missing.append("CIN")
+        if not nom_col:
+            missing.append("NOM_ET_PRENOMS")
+        if not commune_col:
+            missing.append("COMMUNE")
+        if not fkt_col:
+            missing.append("FKT")
+        if not annee_col:
+            missing.append("ANNEE_DE_NAISSANCE")
+
+        if missing:
+            return {
+                "success": True,
+                "duplicates": [],
+                "algorithm": "cin_nom_annee_commune_fkt_residence",
+                "message": f"Colonnes manquantes : {', '.join(missing)}",
+            }
+
+        # --- Normalisation ---
+        df["_cin_clean"] = df[cin_col].fillna("").astype(str).str.upper().str.strip()
+        # Retirer les accents dans le CIN (résidence -> RESIDENCE)
+        df["_cin_clean"] = df["_cin_clean"].apply(self._strip_accents)
+        # Garder uniquement les caracteres alphanumeriques
+        df["_cin_clean"] = df["_cin_clean"].str.replace(r"[^A-Z0-9]", "", regex=True)
+
+        df["_nom_clean"] = df[nom_col].fillna("").astype(str).str.upper().str.strip()
+        df["_commune_clean"] = df[commune_col].fillna("").astype(str).str.upper().str.strip()
+        df["_fkt_clean"] = df[fkt_col].fillna("").astype(str).str.upper().str.strip()
+
+        def normalize_annee(val):
+            if val is None or pd.isna(val):
+                return ""
+            import re as _re
+            match = _re.search(r"\d{4}", str(val))
+            if match:
+                try:
+                    y = int(match.group(0))
+                    if 1900 <= y <= 2100:
+                        return match.group(0)
+                except Exception:
+                    pass
+            return ""
+
+        df["_annee_clean"] = df[annee_col].apply(normalize_annee)
+
+        # --- Filtrer : nom, commune, fkt, annee obligatoires (CIN peut etre vide/residence) ---
+        df = df[
+            (df["_nom_clean"] != "") &
+            (df["_commune_clean"] != "") &
+            (df["_fkt_clean"] != "") &
+            (df["_annee_clean"] != "")
+        ].copy()
+
+        if df.empty:
+            return {
+                "success": True,
+                "duplicates": [],
+                "algorithm": "cin_nom_annee_commune_fkt_residence",
+            }
+
+        # --- Construire les lignes ---
+        rows_list = []
+        for idx, row in df.iterrows():
+            rows_list.append({
+                "rowid": int(row["__sqlite_rowid__"]),
+                "cin": row["_cin_clean"],
+                "nom": row["_nom_clean"],
+                "commune": row["_commune_clean"],
+                "fkt": row["_fkt_clean"],
+                "annee": row["_annee_clean"],
+                "data": {k: row[k] for k in columns if k in row.index},
+            })
+
+        # --- Grouper par (nom, fkt, commune, annee) ---
+        groups = {}
+        for row in rows_list:
+            key = f"{row['nom']}|{row['fkt']}|{row['commune']}|{row['annee']}"
+            groups.setdefault(key, []).append(row)
+
+        # --- Construction des doublons (reference stricte = premiere ligne) ---
+        duplicates = []
+
+        for composite_key, group in groups.items():
+            if len(group) <= 1:
+                continue
+
+            ref_row = group[0]
+            ref_id = ref_row["rowid"]
+            ref_cin = ref_row["cin"]
+
+            for row in group[1:]:
+                if not self._cin_compatible(ref_cin, row["cin"]):
+                    continue
+
+                duplicates.append({
+                    "row_index": row["rowid"],
+                    "reference_id": ref_id,
+                    "data": row["data"],
+                    "reference_data": ref_row["data"],
+                    "algorithm": "cin_nom_annee_commune_fkt_residence",
+                    "cin_col": cin_col,
+                    "nom_col": nom_col,
+                    "commune_col": commune_col,
+                    "fkt_col": fkt_col,
+                    "annee_col": annee_col,
+                    "cin_value": row["cin"],
+                    "reference_cin_value": ref_cin,
+                    "context": {
+                        "type": "CIN_NOM_ANNEE_COMMUNE_FKT_RESIDENCE",
+                        "nom": ref_row["nom"],
+                        "fkt": ref_row["fkt"],
+                        "commune": ref_row["commune"],
+                        "annee": ref_row["annee"],
+                        "cin_ref": ref_cin,
+                        "cin_doublon": row["cin"],
+                    },
+                })
+
+        return {
+            "success": True,
+            "duplicates": duplicates,
+            "algorithm": "cin_nom_annee_commune_fkt_residence",
+        }
+
+    # ============================================================
+    # HELPERS (regle residence)
+    # ============================================================
+    @staticmethod
+    def _strip_accents(text) -> str:
+        """Retire les accents d'une chaine (résidence -> residence)."""
+        import unicodedata
+        if text is None:
+            return ""
+        nfkd = unicodedata.normalize("NFKD", str(text))
+        return "".join(c for c in nfkd if not unicodedata.combining(c))
+
+    @staticmethod
+    def _cin_compatible(cin_a: str, cin_b: str) -> bool:
+        import unicodedata
+        import re as _re
+
+        def normalize(val):
+            if val is None:
+                return ""
+            s = str(val).strip()
+            nfkd = unicodedata.normalize("NFKD", s)
+            s = "".join(c for c in nfkd if not unicodedata.combining(c))
+            s = s.upper()
+            s = _re.sub(r"[^A-Z0-9]", "", s)
+            return s
+
+        a = normalize(cin_a)
+        b = normalize(cin_b)
+
+        # 🔍 DEBUG TEMPORAIRE
+        print(f"[CIN] compare: {cin_a!r} -> {a!r}  vs  {cin_b!r} -> {b!r}")
+
+        if a == b:
+            print(f"[CIN] MATCH (identiques)")
+            return True
+
+        a_special = a == "" or a == "RESIDENCE"
+        b_special = b == "" or b == "RESIDENCE"
+
+        if a_special or b_special:
+            print(f"[CIN] MATCH (special: a_special={a_special}, b_special={b_special})")
+            return True
+
+        print(f"[CIN] NO MATCH (vrais CIN differents)")
+        return False
 
     # ============================================================
     # CONVERSION
@@ -658,6 +897,86 @@ class DuplicatesApi:
     # NETTOYAGE
     # ============================================================
     def clean_database_values(self, file_path: str = None):
+        conn = None
+        try:
+            db_path = self._database_api._get_db_path(file_path)
+            if not db_path:
+                return {"success": False, "message": "Aucune base active."}
+
+            conn = connect_db(db_path)
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';"
+            )
+            tables = [row[0] for row in cursor.fetchall() if row[0] != "sqlite_sequence"]
+
+            if not tables:
+                return {"success": False, "message": "Aucune table dans cette base."}
+
+            cleaned_tables = []
+            total_cells_cleaned = 0
+
+            for table in tables:
+                try:
+                    safe_table = str(table).replace('"', '""')
+
+                    # Lister les colonnes
+                    cursor.execute(f'PRAGMA table_info("{safe_table}")')
+                    columns_info = cursor.fetchall()
+                    if not columns_info:
+                        continue
+
+                    # Pour chaque colonne, remplacer les NULL par une valeur par defaut
+                    for col_info in columns_info:
+                        col_name = col_info[1]
+                        col_type = (col_info[2] or "").upper()
+                        safe_col = str(col_name).replace('"', '""')
+
+                        # Valeur par defaut selon le type
+                        if any(t in col_type for t in ("INT", "REAL", "FLOAT", "NUM", "DOUBLE")):
+                            default_value = 0
+                        else:
+                            default_value = "Non specifie"
+
+                        # Compter les cellules a modifier
+                        cursor.execute(
+                            f'SELECT COUNT(*) FROM "{safe_table}" WHERE "{safe_col}" IS NULL OR "{safe_col}" = ""'
+                        )
+                        count = cursor.fetchone()[0] or 0
+
+                        if count > 0:
+                            cursor.execute(
+                                f'UPDATE "{safe_table}" SET "{safe_col}" = ? WHERE "{safe_col}" IS NULL OR "{safe_col}" = ""',
+                                (default_value,),
+                            )
+                            total_cells_cleaned += count
+
+                    conn.commit()
+                    cleaned_tables.append(table)
+                    print(f"[CLEAN] Table '{table}' nettoyee")
+                except Exception as e:
+                    print(f"[WARN] Erreur nettoyage table '{table}' : {e}")
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass
+                    continue
+
+            return {
+                "success": True,
+                "message": (
+                    f"Nettoyage termine : {len(cleaned_tables)} table(s) traitee(s), "
+                    f"{total_cells_cleaned} cellule(s) vide(s) remplacee(s)."
+                ),
+                "cleaned_tables": cleaned_tables,
+                "total_cells_cleaned": total_cells_cleaned,
+            }
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return {"success": False, "message": f"Erreur lors du nettoyage : {e}"}
+        finally:
+            safe_close_connection(conn)
         conn = None
         try:
             db_path = self._database_api._get_db_path(file_path)

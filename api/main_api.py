@@ -226,8 +226,11 @@ class Api:
     def get_table_columns(self, table_name, file_path=None):
         return self._database.get_table_columns(table_name, file_path)
 
-    def get_table_rows(self, table_name, file_path=None, limit=1000, offset=0):
-        return self._database.get_table_rows(table_name, file_path, limit, offset)
+    def get_table_rows(self, table_name, file_path=None, limit=1000, offset=0,
+                       order_by=None, order_dir="ASC"):
+        return self._database.get_table_rows(
+            table_name, file_path, limit, offset, order_by, order_dir
+        )
 
     def get_distinct_values(self, table_name, column, file_path=None):
         return self._database.get_distinct_values(table_name, column, file_path)
@@ -344,3 +347,5 @@ class Api:
 
     def execute_statistical_query(self, query_type, params=None, file_path=None):
         return self._stats.execute_statistical_query(query_type, params, file_path)
+    def change_password(self, old_password, new_password):
+        return self._auth.change_password(old_password, new_password)

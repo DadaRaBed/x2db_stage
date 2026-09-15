@@ -3036,6 +3036,66 @@ async function initManipulatePage() {
   const searchBarArea = document.querySelector("#manipulate-search-bar-area");
 
   const btnManipulateDb = document.querySelector("#btn-manipulate-db");
+
+  // ============================================================
+  // BOUTONS DE TRI A→Z / Z→A (cote base de donnees)
+  // ============================================================
+  const btnSortAZ = document.getElementById("btn-sort-az");
+  const btnSortZA = document.getElementById("btn-sort-za");
+  const btnSortNone = document.getElementById("btn-sort-none");
+  const sortInfo = document.getElementById("sort-info");
+
+  async function applySort(orderBy, orderDir) {
+    if (!currentManipulateTable) {
+      showNotification("Veuillez d'abord selectionner une table.", false);
+      return;
+    }
+    // Detecter la colonne de nom disponible
+    const activeDbPath = sessionStorage.getItem("current_db_path");
+    const struct =
+      await window.pywebview.api.get_database_structure_matrix(activeDbPath);
+    const columns = struct.structure[currentManipulateTable] || [];
+
+    // Chercher une colonne nom_et_prenoms, nom, name...
+    let nomCol = null;
+    if (orderBy) {
+      nomCol = orderBy;
+    } else {
+      for (const c of columns) {
+        const cl = c.toLowerCase();
+        if (cl === "nom_et_prenoms" || cl === "nom" || cl === "name") {
+          nomCol = c;
+          break;
+        }
+      }
+    }
+
+    if (!nomCol) {
+      showNotification("Aucune colonne 'nom' trouvee dans cette table.", false);
+      return;
+    }
+
+    if (sortInfo) {
+      sortInfo.textContent = orderDir
+        ? `Tri cote serveur : ${nomCol} ${orderDir}`
+        : "";
+    }
+
+    // Recharger la page 1 avec le tri SQL (sur les 40 000 lignes)
+    await loadManipulateTableData(
+      currentManipulateTable,
+      1,
+      orderDir ? nomCol : null,
+      orderDir || "ASC",
+    );
+  }
+
+  if (btnSortAZ)
+    btnSortAZ.addEventListener("click", () => applySort(null, "ASC"));
+  if (btnSortZA)
+    btnSortZA.addEventListener("click", () => applySort(null, "DESC"));
+  if (btnSortNone)
+    btnSortNone.addEventListener("click", () => applySort(null, null));
   if (btnManipulateDb) {
     btnManipulateDb.onclick = async () => {
       if (!isDbOpen) {
@@ -3821,29 +3881,32 @@ async function initManipulatePage() {
 // ============================================
 // CHARGEMENT DES DONNEES - PAGINATION SERVEUR
 // ============================================
-async function loadManipulateTableData(tableName, page = 1) {
+let currentManipulateOrderBy = null;
+let currentManipulateOrderDir = "ASC";
+
+async function loadManipulateTableData(
+  tableName,
+  page = 1,
+  orderBy = null,
+  orderDir = "ASC",
+) {
   const container = document.querySelector(
     "#manipulate-results-table-container",
   );
   const countSpan = document.querySelector("#manipulate-response-count");
   if (!container) return;
 
-  // ✅ SECURITE : refuser une table vide
   if (!tableName || String(tableName).trim() === "") {
-    console.error("[loadManipulateTableData] Table vide !");
     container.innerHTML =
-      "<p style='color: red;'>Erreur : aucune table selectionnee. Veuillez selectionner une table.</p>";
+      "<p style='color: red;'>Erreur : aucune table selectionnee.</p>";
     if (countSpan) countSpan.textContent = "0";
     return;
   }
 
-  // ✅ Restaurer la variable globale (au cas ou)
   currentManipulateTable = tableName;
   currentManipulatePage = page;
-
-  console.log(
-    `[loadManipulateTableData] Chargement table="${tableName}", page=${page}`,
-  );
+  currentManipulateOrderBy = orderBy;
+  currentManipulateOrderDir = orderDir;
 
   try {
     const activeDbPath = sessionStorage.getItem("current_db_path");
@@ -3854,6 +3917,8 @@ async function loadManipulateTableData(tableName, page = 1) {
       activeDbPath,
       MANIPULATE_PER_PAGE,
       offset,
+      orderBy, // ← nouveau
+      orderDir, // ← nouveau
     );
 
     if (res && res.success) {
@@ -4111,145 +4176,55 @@ async function initAdvancedQuerySelects(tableName) {
 // MODAL PLEIN ECRAN
 // ============================================
 function openFullScreenModal(titleText, htmlContent) {
-  let modalOverlay = document.getElementById("fullscreen-modal-overlay");
-  if (!modalOverlay) {
-    modalOverlay = document.createElement("div");
-    modalOverlay.id = "fullscreen-modal-overlay";
-    modalOverlay.style.cssText = `
-      position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
-      background: rgba(0, 0, 0, 0.7); backdrop-filter: blur(10px);
-      z-index: 99999; display: flex; justify-content: center; align-items: center; padding: 20px;
-    `;
-    modalOverlay.innerHTML = `
-      <div style="background: #ffffff; color: #1a1a2e; width: 100vw; height: 100vh; border-radius: 0; display: flex; flex-direction: column; overflow: hidden;">
-        <div style="padding: 16px 24px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; background: #f8fafc;">
-          <h2 id="modal-title-text" style="margin: 0; font-size: 1.4rem; display: flex; align-items: center; gap: 12px; color: #1a1a2e;">
-            <i class="fas fa-expand" style="color: #1a4d3a;"></i>
-            <span style="color: #1a1a2e;">${titleText}</span>
-          </h2>
-          <button type="button" id="close-fullscreen-modal" style="background: none; border: none; font-size: 2rem; cursor: pointer; color: #1a1a2e;">&times;</button>
-        </div>
-        <div id="fullscreen-modal-body" style="padding: 24px; overflow-y: auto; flex: 1; background: #ffffff; color: #1a1a2e;"></div>
-        <div style="padding: 14px 24px; border-top: 1px solid #e2e8f0; background: #f8fafc; display: flex; justify-content: flex-end; gap: 10px;">
-          <button type="button" class="button button-primary" id="modal-btn-select-all" style="background: #1a4d3a; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer;">
-            <i class="fas fa-check-double"></i> Tout selectionner
-          </button>
-          <button type="button" class="button button-primary" id="modal-btn-delete" style="background: #dc3545; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer;">
-            <i class="fas fa-trash"></i> Supprimer selectionnes
-          </button>
-          <button type="button" class="secondary-button" id="modal-btn-fermer" style="padding: 10px 20px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">
-            <i class="fas fa-times"></i> Fermer
-          </button>
-        </div>
+  document.getElementById("fullscreen-modal-overlay")?.remove();
+
+  const overlay = document.createElement("div");
+  overlay.id = "fullscreen-modal-overlay";
+  overlay.style.cssText = `
+    position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+    background: rgba(0, 0, 0, 0.7); backdrop-filter: blur(10px);
+    z-index: 99999; display: flex; justify-content: center; align-items: center; padding: 20px;
+  `;
+
+  overlay.innerHTML = `
+    <div style="background: #ffffff; color: #1a1a2e; width: 100vw; height: 100vh; border-radius: 0; display: flex; flex-direction: column; overflow: hidden;">
+      <div style="padding: 16px 24px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; background: #f8fafc;">
+        <h2 style="margin: 0; font-size: 1.4rem; display: flex; align-items: center; gap: 12px; color: #1a1a2e;">
+          <i class="fas fa-expand" style="color: #1a4d3a;"></i>
+          <span id="modal-title-text" style="color: #1a1a2e;">${escapeHtml(titleText)}</span>
+        </h2>
+        <button type="button" id="close-fullscreen-modal" style="background: none; border: none; font-size: 2rem; cursor: pointer; color: #1a1a2e;">&times;</button>
       </div>
-    `;
-    document.body.appendChild(modalOverlay);
-    const closeModal = () => {
-      modalOverlay.style.display = "none";
-    };
-    document.getElementById("close-fullscreen-modal").onclick = closeModal;
-    document.getElementById("modal-btn-fermer").onclick = closeModal;
-  }
+      <div id="fullscreen-modal-body" style="padding: 24px; overflow-y: auto; flex: 1; background: #ffffff; color: #1a1a2e;"></div>
+      <div style="padding: 14px 24px; border-top: 1px solid #e2e8f0; background: #f8fafc; display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap;">
+        <button type="button" class="button button-primary" id="modal-btn-select-all" style="background: #1a4d3a; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-weight: 600;">
+          <i class="fas fa-check-double"></i> Tout selectionner
+        </button>
+        <button type="button" class="button button-primary" id="modal-btn-delete" style="background: #dc3545; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-weight: 600;">
+          <i class="fas fa-trash"></i> Supprimer selectionnes
+        </button>
+        <button type="button" class="secondary-button" id="modal-btn-fermer" style="padding: 10px 20px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 600;">
+          <i class="fas fa-times"></i> Fermer
+        </button>
+      </div>
+    </div>
+  `;
 
-  document
-    .getElementById("modal-title-text")
-    .querySelector("span").textContent = titleText;
-  let cleanHtml = htmlContent;
-  if (cleanHtml.includes("<table")) {
-    cleanHtml = cleanHtml.replace(
-      /<table/g,
-      '<table style="width: 100%; border-collapse: collapse; background: #ffffff; color: #1a1a2e;"',
-    );
-    cleanHtml = cleanHtml.replace(
-      /<th/g,
-      '<th style="background: #1a4d3a; color: white; padding: 10px; text-align: left; border: 1px solid #e2e8f0;"',
-    );
-    cleanHtml = cleanHtml.replace(
-      /<td/g,
-      '<td style="padding: 8px 10px; border: 1px solid #e2e8f0; background: #ffffff; color: #1a1a2e;"',
-    );
-    cleanHtml = cleanHtml.replace(/<tr/g, '<tr style="background: #ffffff;"');
-  }
-  document.getElementById("fullscreen-modal-body").innerHTML = cleanHtml;
-  modalOverlay.style.display = "flex";
+  document.body.appendChild(overlay);
 
-  const modalSelectAllBtn = document.getElementById("modal-btn-select-all");
-  if (modalSelectAllBtn) {
-    modalSelectAllBtn.onclick = () => {
-      const checkboxes = document.querySelectorAll(
-        "#fullscreen-modal-body .dup-checkbox, #fullscreen-modal-body input[type='checkbox']",
-      );
-      if (checkboxes.length === 0) {
-        showNotification("Aucune case a cocher trouvee.", false);
-        return;
-      }
-      const allChecked = Array.from(checkboxes).every((chk) => chk.checked);
-      checkboxes.forEach((chk) => {
-        chk.checked = !allChecked;
-      });
-      showNotification(
-        allChecked ? "Tout deselectionne" : "Tout selectionne",
-        true,
-      );
-    };
-  }
+  const body = document.getElementById("fullscreen-modal-body");
 
-  const modalDeleteBtn = document.getElementById("modal-btn-delete");
-  if (modalDeleteBtn) {
-    modalDeleteBtn.onclick = async () => {
-      const checkedBoxes = document.querySelectorAll(
-        "#fullscreen-modal-body .dup-checkbox:checked, #fullscreen-modal-body input[type='checkbox']:checked",
-      );
-      if (checkedBoxes.length === 0) {
-        showNotification("Veuillez selectionner au moins un element.", false);
-        return;
-      }
-      if (
-        !confirm(`Supprimer ${checkedBoxes.length} element(s) selectionne(s) ?`)
-      )
-        return;
-      try {
-        const duplicatesToDelete = [];
-        checkedBoxes.forEach((chk) => {
-          const tableName = chk.getAttribute("data-table");
-          const rowIndex = chk.getAttribute("data-rowid");
-          if (tableName && rowIndex) {
-            duplicatesToDelete.push({
-              tableName,
-              row_index: parseInt(rowIndex),
-            });
-          }
-        });
-        if (duplicatesToDelete.length === 0) {
-          showNotification("Aucun element valide a supprimer.", false);
-          return;
-        }
-        const activeDbPath = sessionStorage.getItem("current_db_path");
-        const result = await window.pywebview.api.delete_duplicates_batch(
-          duplicatesToDelete,
-          activeDbPath,
-        );
-        if (result && result.success) {
-          showNotification(
-            `${result.deleted} element(s) supprime(s) en ${result.elapsed_seconds}s.`,
-            true,
-          );
-          logUserAction(`Suppression de ${result.deleted} elements`);
-          document.getElementById("fullscreen-modal-overlay").style.display =
-            "none";
-        } else {
-          showNotification(
-            result?.message || "Erreur lors de la suppression.",
-            false,
-          );
-        }
-      } catch (err) {
-        console.error("Erreur lors de la suppression:", err);
-        showNotification("Erreur lors de la suppression.", false);
-      }
-    };
-  }
+  // Injecter le HTML en gardant les attributs data-*
+  body.innerHTML = htmlContent;
 
+  // S'assurer que les checkboxes du modal sont reconnues
+  body.querySelectorAll("input[type='checkbox']").forEach((chk) => {
+    if (!chk.classList.contains("dup-checkbox")) {
+      chk.classList.add("dup-checkbox");
+    }
+  });
+
+  // Forcer les couleurs (le HTML injecte peut avoir d'autres styles)
   const style = document.createElement("style");
   style.textContent = `
     #fullscreen-modal-body table { background: #ffffff !important; color: #1a1a2e !important; }
@@ -4258,7 +4233,116 @@ function openFullScreenModal(titleText, htmlContent) {
     #fullscreen-modal-body tr:nth-child(even) td { background: #f8fafc !important; }
     #fullscreen-modal-body tr:hover td { background: #e8f3ef !important; }
   `;
-  document.getElementById("fullscreen-modal-body").appendChild(style);
+  body.appendChild(style);
+
+  // Fermer
+  const close = () => overlay.remove();
+  document.getElementById("close-fullscreen-modal").onclick = close;
+  document.getElementById("modal-btn-fermer").onclick = close;
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) close();
+  });
+
+  // ============================================================
+  // TOUT SELECTIONNER (corrige : parcourt tout le modal)
+  // ============================================================
+  document.getElementById("modal-btn-select-all").onclick = () => {
+    const checkboxes = body.querySelectorAll("input[type='checkbox']");
+    if (checkboxes.length === 0) {
+      showNotification("Aucune case a cocher trouvee.", false);
+      return;
+    }
+    const allChecked = Array.from(checkboxes).every((c) => c.checked);
+    checkboxes.forEach((c) => (c.checked = !allChecked));
+    showNotification(
+      allChecked
+        ? "Tout deselectionne"
+        : `Tout selectionne (${checkboxes.length})`,
+      true,
+    );
+  };
+
+  // ============================================================
+  // SUPPRIMER SELECTIONNES (corrige : utilise les data-* du modal)
+  // ============================================================
+  document.getElementById("modal-btn-delete").onclick = async () => {
+    // Recuperer UNIQUEMENT les checkboxes cochees qui ont des data-table/data-rowid
+    const checked = body.querySelectorAll("input[type='checkbox']:checked");
+    if (checked.length === 0) {
+      showNotification("Veuillez selectionner au moins un element.", false);
+      return;
+    }
+
+    const items = [];
+    checked.forEach((chk) => {
+      const tableName = chk.getAttribute("data-table");
+      const rowIndex = chk.getAttribute("data-rowid");
+      if (tableName && rowIndex) {
+        items.push({ tableName, row_index: parseInt(rowIndex, 10) });
+      }
+    });
+
+    if (items.length === 0) {
+      showNotification("Aucun element valide a supprimer.", false);
+      return;
+    }
+
+    if (
+      !confirm(
+        `Supprimer ${items.length} element(s) ? Cette action est irreversible.`,
+      )
+    )
+      return;
+
+    try {
+      await waitForApi();
+      const activeDbPath = sessionStorage.getItem("current_db_path");
+      const result = await window.pywebview.api.delete_duplicates_batch(
+        items,
+        activeDbPath,
+      );
+      if (result && result.success) {
+        showNotification(`${result.deleted} element(s) supprime(s).`, true);
+        logUserAction(`Suppression de ${result.deleted} elements`);
+
+        // Retirer les lignes supprimees du DOM du modal
+        const deletedIds = new Set(
+          items.map((i) => `${i.tableName}|${i.row_index}`),
+        );
+        body
+          .querySelectorAll("input[type='checkbox'][data-table][data-rowid]")
+          .forEach((chk) => {
+            const key = `${chk.getAttribute("data-table")}|${chk.getAttribute("data-rowid")}`;
+            if (deletedIds.has(key)) {
+              // Supprimer les 2 lignes correspondantes (DOUBLON + REFERENCE)
+              const tr = chk.closest("tr");
+              if (tr) {
+                const nextTr = tr.nextElementSibling;
+                tr.remove();
+                if (nextTr) nextTr.remove();
+              }
+            }
+          });
+
+        // Mettre a jour les compteurs
+        const remaining = body.querySelectorAll(
+          "input[type='checkbox'][data-table]",
+        ).length;
+        if (remaining === 0) {
+          body.innerHTML =
+            '<p style="color: #27ae60; text-align: center; padding: 2rem;">Tous les elements ont ete supprimes.</p>';
+        }
+      } else {
+        showNotification(
+          result?.message || "Erreur lors de la suppression.",
+          false,
+        );
+      }
+    } catch (err) {
+      console.error(err);
+      showNotification("Erreur lors de la suppression.", false);
+    }
+  };
 }
 
 // ============================================
@@ -5527,6 +5611,16 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
+  document.addEventListener("click", (e) => {
+    if (e.target.closest(".change-password-global-btn")) {
+      e.preventDefault();
+      showChangePasswordModal();
+      document
+        .querySelectorAll(".user-menu")
+        .forEach((m) => m.classList.add("hidden"));
+    }
+  });
+
   document.addEventListener("click", async (e) => {
     const quitBtn = e.target.closest(".quit-global-btn");
     if (quitBtn) {
@@ -5836,4 +5930,112 @@ async function handleForgotPasswordSubmit(e) {
     console.error(err);
     showMessage("#forgot-message", "Erreur de communication.");
   }
+}
+// ============================================
+// CHANGER DE MOT DE PASSE
+// ============================================
+function showChangePasswordModal() {
+  const overlay = document.createElement("div");
+  overlay.className = "edit-modal-overlay";
+  overlay.style.zIndex = "99997";
+
+  overlay.innerHTML = `
+    <div style="background: #ffffff; border-radius: 12px; padding: 0; max-width: 480px; width: 95%; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3); overflow: hidden;">
+      <div style="background: linear-gradient(135deg, #1a4d3a, #3d8b6a); color: white; padding: 20px 24px; display: flex; align-items: center; justify-content: space-between;">
+        <h3 style="margin: 0; font-size: 1.2rem; display: flex; align-items: center; gap: 10px;">
+          <i class="fas fa-key"></i> Changer de mot de passe
+        </h3>
+        <button type="button" id="close-chpwd-modal" style="background: rgba(255,255,255,0.2); border: none; color: white; font-size: 1.5rem; cursor: pointer; width: 32px; height: 32px; border-radius: 50%;">&times;</button>
+      </div>
+      <div style="padding: 24px;">
+        <div class="form-group" style="margin-bottom: 1rem;">
+          <label style="display: block; font-weight: 600; margin-bottom: 6px; color: #334155; font-size: 0.9rem;">
+            Ancien mot de passe :
+          </label>
+          <input type="password" id="chpwd-old" placeholder="Votre mot de passe actuel" autocomplete="current-password"
+            style="width: 100%; padding: 0.6rem; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.9rem; box-sizing: border-box;" />
+        </div>
+        <div class="form-group" style="margin-bottom: 1rem;">
+          <label style="display: block; font-weight: 600; margin-bottom: 6px; color: #334155; font-size: 0.9rem;">
+            Nouveau mot de passe :
+          </label>
+          <input type="password" id="chpwd-new" placeholder="Au moins 6 caracteres" autocomplete="new-password"
+            style="width: 100%; padding: 0.6rem; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.9rem; box-sizing: border-box;" />
+        </div>
+        <div class="form-group" style="margin-bottom: 1rem;">
+          <label style="display: block; font-weight: 600; margin-bottom: 6px; color: #334155; font-size: 0.9rem;">
+            Confirmer le nouveau mot de passe :
+          </label>
+          <input type="password" id="chpwd-confirm" placeholder="Retapez le nouveau mot de passe" autocomplete="new-password"
+            style="width: 100%; padding: 0.6rem; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.9rem; box-sizing: border-box;" />
+        </div>
+        <div id="chpwd-status" style="margin-bottom: 1rem;"></div>
+        <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 1.5rem;">
+          <button type="button" id="btn-cancel-chpwd" style="padding: 0.6rem 1.5rem; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; background: #6c757d; color: white;">Annuler</button>
+          <button type="button" id="btn-save-chpwd" style="padding: 0.6rem 1.5rem; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; background: #1a4d3a; color: white;">
+            <i class="fas fa-save"></i> Enregistrer
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  const close = () => overlay.remove();
+  overlay.querySelector("#close-chpwd-modal").onclick = close;
+  overlay.querySelector("#btn-cancel-chpwd").onclick = close;
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) close();
+  });
+
+  const statusEl = overlay.querySelector("#chpwd-status");
+
+  overlay.querySelector("#btn-save-chpwd").onclick = async () => {
+    const oldPwd = overlay.querySelector("#chpwd-old").value;
+    const newPwd = overlay.querySelector("#chpwd-new").value;
+    const confirm = overlay.querySelector("#chpwd-confirm").value;
+
+    if (!oldPwd || !newPwd || !confirm) {
+      statusEl.innerHTML =
+        '<p style="color: #dc3545; font-size: 0.9rem;"><i class="fas fa-exclamation-circle"></i> Tous les champs sont obligatoires.</p>';
+      return;
+    }
+    if (newPwd.length < 6) {
+      statusEl.innerHTML =
+        '<p style="color: #dc3545; font-size: 0.9rem;"><i class="fas fa-exclamation-circle"></i> Le nouveau mot de passe doit contenir au moins 6 caracteres.</p>';
+      return;
+    }
+    if (newPwd !== confirm) {
+      statusEl.innerHTML =
+        '<p style="color: #dc3545; font-size: 0.9rem;"><i class="fas fa-exclamation-circle"></i> Les mots de passe ne correspondent pas.</p>';
+      return;
+    }
+
+    statusEl.innerHTML =
+      '<p style="color: #1a4d3a; font-size: 0.9rem;"><i class="fas fa-spinner fa-spin"></i> Modification...</p>';
+
+    try {
+      await waitForApi();
+      const res = await window.pywebview.api.change_password(oldPwd, newPwd);
+      if (res && res.success) {
+        statusEl.innerHTML =
+          '<p style="color: #27ae60; font-size: 0.9rem;"><i class="fas fa-check-circle"></i> Mot de passe modifie.</p>';
+        setTimeout(() => {
+          close();
+          showNotification("Mot de passe modifie avec succes.", true);
+          logUserAction("Changement de mot de passe");
+        }, 1200);
+      } else {
+        statusEl.innerHTML =
+          '<p style="color: #dc3545; font-size: 0.9rem;"><i class="fas fa-times-circle"></i> ' +
+          escapeHtml(res?.message || "Erreur.") +
+          "</p>";
+      }
+    } catch (err) {
+      statusEl.innerHTML =
+        '<p style="color: #dc3545; font-size: 0.9rem;"><i class="fas fa-times-circle"></i> ' +
+        escapeHtml(err.message) +
+        "</p>";
+    }
+  };
 }

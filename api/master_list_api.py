@@ -44,7 +44,7 @@ class MasterListApi:
             "district": ...,
             "commune": ...,
             "fkt": ...,
-            "nom_et_prenoms": ...,
+            "nom_et_prenoms": ...,   # STRICT : uniquement 'nom_et_prenoms' et variantes
             "sexe": ...,   (h_f / h / sexe / genre / sexe___homme_et_femme)
             "filieres": ...,
             "cin": ...,
@@ -69,82 +69,100 @@ class MasterListApi:
             "opr": None,
         }
 
+        # Variantes acceptees pour 'nom_et_prenoms' (strict)
+        NOM_ET_PRENOMS_VARIANTS = {
+            "nom_et_prenoms",
+            "nom_et_prenom",
+            "noms_et_prenoms",
+            "noms_et_prenom",
+            "nom_prenoms",
+            "nom_prenom",
+            "nom_et_prenoms_",
+            "nom_et_prenoms__",
+        }
+
         for c in df.columns:
             cl = c.lower().strip()
+            # Normaliser : retirer espaces/tirets multiples
+            cl_norm = cl.replace(" ", "_").replace("-", "_")
+            while "__" in cl_norm:
+                cl_norm = cl_norm.replace("__", "_")
+            cl_norm = cl_norm.strip("_")
 
             # --- Region ---
-            if mapping["region"] is None and cl == "region":
+            if mapping["region"] is None and cl_norm == "region":
                 mapping["region"] = c
 
             # --- District ---
-            elif mapping["district"] is None and cl == "district":
+            elif mapping["district"] is None and cl_norm == "district":
                 mapping["district"] = c
 
             # --- Commune ---
-            elif mapping["commune"] is None and cl == "commune":
+            elif mapping["commune"] is None and cl_norm == "commune":
                 mapping["commune"] = c
 
             # --- FKT (fkt ou fokontany) ---
-            elif mapping["fkt"] is None and ("fkt" in cl or "fokontany" in cl):
+            elif mapping["fkt"] is None and (
+                cl_norm == "fkt" or cl_norm == "fokontany"
+            ):
                 mapping["fkt"] = c
 
-            # --- Nom et prenoms (nom, nom_et_prenoms, prenom, etc.) ---
+            # --- Nom et prenoms (STRICT) ---
             elif mapping["nom_et_prenoms"] is None and (
-                "nom" in cl or "prenom" in cl
+                cl_norm in NOM_ET_PRENOMS_VARIANTS
             ):
                 mapping["nom_et_prenoms"] = c
 
             # --- Sexe : h_f, h, sexe, genre, sexe___homme_et_femme ---
             elif mapping["sexe"] is None and (
-                cl in ("h_f", "hf", "h", "sexe", "genre")
-                or "sexe" in cl
-                or "homme_et_femme" in cl
-                or "homme_femme" in cl
+                cl_norm in ("h_f", "hf", "h", "sexe", "genre")
+                or cl_norm == "sexe_homme_et_femme"
+                or cl_norm == "sexe_homme_femme"
+                or cl_norm.startswith("sexe_")
             ):
                 mapping["sexe"] = c
 
             # --- Filieres ---
-            elif mapping["filieres"] is None and ("filiere" in cl):
+            elif mapping["filieres"] is None and cl_norm == "filieres":
                 mapping["filieres"] = c
 
             # --- CIN ---
-            elif mapping["cin"] is None and ("cin" in cl or cl == "nin"):
+            elif mapping["cin"] is None and (
+                cl_norm == "cin" or cl_norm == "nin"
+            ):
                 mapping["cin"] = c
 
             # --- Annee de naissance ---
             elif mapping["annee_de_naissance"] is None and (
-                "annee" in cl and "naissance" in cl
-            ):
-                mapping["annee_de_naissance"] = c
-            elif mapping["annee_de_naissance"] is None and cl in (
-                "annee_naissance",
-                "annee_naiss",
-                "annee_de_naissance",
-                "date_naissance",
+                cl_norm in (
+                    "annee_de_naissance",
+                    "annee_naissance",
+                    "annee_naiss",
+                    "date_naissance",
+                    "date_de_naissance",
+                )
             ):
                 mapping["annee_de_naissance"] = c
 
-            # --- Categorisation EAF (categorisation_eaf ou eaf) ---
+            # --- Categorisation EAF ---
             elif mapping["categorisation_eaf"] is None and (
-                "categorisation" in cl or "categoris" in cl or cl == "eaf"
+                cl_norm in ("categorisation_eaf", "categorisation", "eaf")
             ):
                 mapping["categorisation_eaf"] = c
 
             # --- Filiation menages ---
             elif mapping["filiation_menages"] is None and (
-                "filiation" in cl
+                cl_norm in ("filiation_menages", "filiation_menage", "filiation")
             ):
                 mapping["filiation_menages"] = c
 
             # --- OPR (opr ou nom_opr) ---
             elif mapping["opr"] is None and (
-                cl == "opr" or "opr" in cl or "nom_opr" in cl
+                cl_norm == "opr" or cl_norm == "nom_opr"
             ):
                 mapping["opr"] = c
 
-        return mapping
-
-    # ============================================================
+        return mapping    # ============================================================
     # NORMALISATION
     # ============================================================
     @staticmethod

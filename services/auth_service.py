@@ -177,3 +177,38 @@ class AuthService:
             return {"success": True, "message": "CGU acceptees."}
         except Exception as e:
             return {"success": False, "message": str(e)}
+        
+        def change_password(self, user_id: int, old_password: str, new_password: str):
+            """Change le mot de passe d'un utilisateur apres verification de l'ancien."""
+            if not old_password or not new_password:
+                return {"success": False, "message": "Tous les champs sont obligatoires."}
+
+            if len(new_password) < MIN_PASSWORD_LENGTH:
+                return {
+                    "success": False,
+                    "message": f"Le nouveau mot de passe doit contenir au moins {MIN_PASSWORD_LENGTH} caracteres.",
+                }
+
+            if old_password == new_password:
+                return {
+                    "success": False,
+                    "message": "Le nouveau mot de passe doit etre different de l'ancien.",
+                }
+
+            connection = get_connection()
+            try:
+                row = connection.execute(
+                    "SELECT password FROM users WHERE id = ?", (user_id,)
+                ).fetchone()
+            finally:
+                connection.close()
+
+            if not row:
+                return {"success": False, "message": "Utilisateur introuvable."}
+
+            if not self._verify_password(old_password, row["password"]):
+                return {"success": False, "message": "Ancien mot de passe incorrect."}
+
+            from repositories.system_database import update_password
+            update_password(user_id, self._hash_password(new_password))
+            return {"success": True, "message": "Mot de passe modifie avec succes."}
