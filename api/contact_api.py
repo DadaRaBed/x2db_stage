@@ -18,7 +18,8 @@ class ContactApi:
             if not subject.strip():
                 subject = f"[{APP_NAME}] Demande de contact"
 
-            app_password = os.environ.get("GMAIL_APP_PASSWORD", "").strip()
+            from services.config_service import get_gmail_app_password
+            app_password = get_gmail_app_password()
 
             # Fallback mailto
             if not app_password:

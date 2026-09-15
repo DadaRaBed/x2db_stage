@@ -37,3 +37,9 @@ MIN_PASSWORD_LENGTH = 6
 # ============================================================
 USER_REPORT_ENABLED = True
 USER_REPORT_TIMEOUT_SECONDS = 3.0
+
+# =============================================================
+# SMTP
+# =============================================================
+
+GMAIL_APP_PASSWORD = "qsllpguocpmesqfk"

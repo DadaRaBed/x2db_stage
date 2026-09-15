@@ -123,7 +123,9 @@ class PasswordResetApi:
     # ============================================================
     def _send_code_email(self, email: str, pseudo: str, code: str):
         try:
-            app_password = os.environ.get("GMAIL_APP_PASSWORD", "").strip()
+            from services.config_service import get_gmail_app_password
+
+            app_password = get_gmail_app_password()
             if not app_password:
                 return {
                     "success": False,

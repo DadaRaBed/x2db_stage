@@ -14,11 +14,15 @@ from api import Api
 def main():
     """Initialise et lance l'application."""
     from repositories.system_database import initialize_database
+    from services.config_service import ensure_config_file
 
     # 1. Initialiser system.db
     initialize_database()
 
-    # 2. Creer l'API
+    # 2.  Creer config.json s'il n'existe pas
+    ensure_config_file()
+
+    # 3. Creer l'API
     api = Api()
 
     # 3. Creer la fenetre
@@ -33,11 +37,11 @@ def main():
         maximized=True,
     )
 
-    # 4. ✅ ENREGISTRER LA FENETRE DANS paths._APP_WINDOW
+    # 4.ENREGISTRER LA FENETRE DANS paths._APP_WINDOW
     #    (C'est cette ligne qui rend la fenetre disponible a l'API)
     set_app_window(window)
     
-    webview.start(debug=True)
+    webview.start()
 
 
 if __name__ == "__main__":

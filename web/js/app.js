@@ -479,14 +479,14 @@ function resetDuplicateView() {
 // ============================================
 function resetForgotPasswordUI() {
   forgotPasswordState = { step: 1, userId: null, pseudo: null, email: null };
-  
+
   const s1 = document.getElementById("forgot-step-email");
   const s2 = document.getElementById("forgot-step-code");
   const s3 = document.getElementById("forgot-step-password");
   if (s1) s1.classList.remove("hidden");
   if (s2) s2.classList.add("hidden");
   if (s3) s3.classList.add("hidden");
-  
+
   const emailInput = document.getElementById("forgot-email-input");
   const codeInput = document.getElementById("forgot-code-input");
   const pwdInput = document.getElementById("forgot-new-password");
@@ -495,13 +495,14 @@ function resetForgotPasswordUI() {
   if (codeInput) codeInput.value = "";
   if (pwdInput) pwdInput.value = "";
   if (pwdConfirm) pwdConfirm.value = "";
-  
+
   const title = document.getElementById("forgot-title");
   const subtitle = document.getElementById("forgot-subtitle");
   if (title) title.textContent = "Mot de passe oublie";
-  if (subtitle) subtitle.textContent =
-    "Saisissez votre email pour recevoir un code de validation.";
-  
+  if (subtitle)
+    subtitle.textContent =
+      "Saisissez votre email pour recevoir un code de validation.";
+
   showMessage("#forgot-message", "");
 }
 
@@ -517,8 +518,6 @@ function cancelForgotPassword() {
   resetForgotPasswordUI();
   showView(loginView);
 }
-
-
 
 async function handleForgotEmailSubmit(e) {
   e.preventDefault();
@@ -576,34 +575,35 @@ async function handleForgotEmailSubmit(e) {
     await waitForApi();
     const result = await window.pywebview.api.request_password_reset(email);
     console.log("[FORGOT] result =", result);
-    
+
     if (!result || !result.success) {
       showMessage("#forgot-message", result?.message || "Erreur.");
       return;
     }
-    
+
     forgotPasswordState.step = 2;
     forgotPasswordState.userId = result.user_id;
     forgotPasswordState.pseudo = result.pseudo;
     forgotPasswordState.email = email;
-    
+
     // Cacher l'étape 1, montrer l'étape 2
     document.getElementById("forgot-step-email")?.classList.add("hidden");
     document.getElementById("forgot-step-code")?.classList.remove("hidden");
-    
+
     // Titres
     const title = document.getElementById("forgot-title");
     const subtitle = document.getElementById("forgot-subtitle");
     const userName = document.getElementById("forgot-user-name");
     if (title) title.textContent = "Code de validation";
-    if (subtitle) subtitle.textContent =
-      "Notez le code ci-dessous soigneusement, il ne sera plus affiche.";
+    if (subtitle)
+      subtitle.textContent =
+        "Notez le code ci-dessous soigneusement, il ne sera plus affiche.";
     if (userName) userName.textContent = `Utilisateur : ${result.pseudo}`;
-    
+
     // ⭐⭐⭐ AFFICHER LE CODE ⭐⭐⭐
     console.log("[FORGOT] Appel showValidationCodeBox avec :", result.code);
     showValidationCodeBox(result.code);
-    
+
     showMessage("#forgot-message", "Email verifie. Code genere.", true);
     setTimeout(() => {
       document.getElementById("forgot-code-input")?.focus();
@@ -628,25 +628,26 @@ async function handleForgotEmailSubmit(e) {
       showMessage("#forgot-message", result?.message || "Erreur.");
       return;
     }
-    
+
     forgotPasswordState.step = 2;
     forgotPasswordState.userId = result.user_id;
     forgotPasswordState.pseudo = result.pseudo;
     forgotPasswordState.email = email;
-    
+
     // Cacher l'etape 1, montrer l'etape 2
     document.getElementById("forgot-step-email")?.classList.add("hidden");
     document.getElementById("forgot-step-code")?.classList.remove("hidden");
-    
+
     // Titres
     const title = document.getElementById("forgot-title");
     const subtitle = document.getElementById("forgot-subtitle");
     const userName = document.getElementById("forgot-user-name");
     if (title) title.textContent = "Verification du code";
-    if (subtitle) subtitle.textContent =
-      "Un code a ete envoye a votre adresse email. Verifiez votre boite de reception (et vos spams).";
+    if (subtitle)
+      subtitle.textContent =
+        "Un code a ete envoye a votre adresse email. Verifiez votre boite de reception (et vos spams).";
     if (userName) userName.textContent = `Utilisateur : ${result.pseudo}`;
-    
+
     showMessage("#forgot-message", result.message, true);
     setTimeout(() => {
       document.getElementById("forgot-code-input")?.focus();
@@ -5757,7 +5758,7 @@ async function handleForgotCodeSubmit(e) {
     await waitForApi();
     const result = await window.pywebview.api.verify_reset_code(
       forgotPasswordState.userId,
-        code,
+      code,
     );
     if (!result || !result.success) {
       showMessage("#forgot-message", result?.message || "Code incorrect.");
@@ -5766,15 +5767,20 @@ async function handleForgotCodeSubmit(e) {
     forgotPasswordState.step = 3;
     document.getElementById("forgot-step-code")?.classList.add("hidden");
     document.getElementById("forgot-step-password")?.classList.remove("hidden");
-    
+
     const title = document.getElementById("forgot-title");
     const subtitle = document.getElementById("forgot-subtitle");
     const userName2 = document.getElementById("forgot-user-name-2");
     if (title) title.textContent = "Nouveau mot de passe";
     if (subtitle) subtitle.textContent = "Choisissez un nouveau mot de passe.";
-    if (userName2) userName2.textContent = `Utilisateur : ${forgotPasswordState.pseudo}`;
-    
-    showMessage("#forgot-message", "Code valide. Choisissez un nouveau mot de passe.", true);
+    if (userName2)
+      userName2.textContent = `Utilisateur : ${forgotPasswordState.pseudo}`;
+
+    showMessage(
+      "#forgot-message",
+      "Code valide. Choisissez un nouveau mot de passe.",
+      true,
+    );
     setTimeout(() => {
       document.getElementById("forgot-new-password")?.focus();
     }, 100);
