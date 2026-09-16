@@ -21,3 +21,5 @@ Ouverture de la base : hello.db
 [ERREUR IMPORT] Feuille 'COUPLAGE 2019_2026' : duplicate column name: filiere
 [ERREUR IMPORT] Feuille 'COUPLAGE 2025' : duplicate column name: filiere
 [ERREUR IMPORT] Feuille 'COUPLAGE 2019_2026' : duplicate column name: filiere
+[ERREUR IMPORT] Feuille 'COUPLAGE 2025' : duplicate column name: filiere
+[ERREUR IMPORT] Feuille 'COUPLAGE 2019_2026' : duplicate column name: filiere
