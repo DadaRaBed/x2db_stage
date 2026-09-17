@@ -679,3 +679,123 @@ body {
 .link-button:hover {
   opacity: 0.75;
 }
+
+/* ============================================
+   SUPPORT THEME SOMBRE - MODALES ET COMPOSANTS
+   ============================================ */
+
+/* Overlay des modales : plus sombre en dark */
+[data-theme="dark"] .edit-modal-overlay {
+  background: rgba(0, 0, 0, 0.85) !important;
+}
+
+/* Modales generiques */
+[data-theme="dark"] .edit-modal-box {
+  background: var(--card-bg, #1e293b) !important;
+  color: var(--text-color, #e2e8f0) !important;
+}
+
+[data-theme="dark"] .edit-modal-box h3,
+[data-theme="dark"] .edit-modal-box p,
+[data-theme="dark"] .edit-modal-box label,
+[data-theme="dark"] .edit-modal-box summary,
+[data-theme="dark"] .edit-modal-box strong {
+  color: var(--text-color, #e2e8f0) !important;
+}
+
+/* Inputs dans les modales */
+[data-theme="dark"] .edit-modal-box input,
+[data-theme="dark"] .edit-modal-box textarea,
+[data-theme="dark"] .edit-modal-box select,
+[data-theme="dark"] #fullscreen-modal-body input,
+[data-theme="dark"] #fullscreen-modal-body textarea,
+[data-theme="dark"] #fullscreen-modal-body select {
+  background: var(--bg-input, #1e293b) !important;
+  color: var(--text-color, #e2e8f0) !important;
+  border-color: var(--border-color, #4a5568) !important;
+}
+
+[data-theme="dark"] .edit-modal-box input::placeholder,
+[data-theme="dark"] .edit-modal-box textarea::placeholder {
+  color: var(--text-muted, #94a3b8) !important;
+  opacity: 0.8;
+}
+
+/* Tableaux dans les modales */
+[data-theme="dark"] .edit-modal-box table,
+[data-theme="dark"] #fullscreen-modal-body table {
+  background: var(--card-bg, #1e293b) !important;
+  color: var(--text-color, #e2e8f0) !important;
+}
+
+[data-theme="dark"] .edit-modal-box table th,
+[data-theme="dark"] #fullscreen-modal-body table th {
+  background: #1a4d3a !important;
+  color: white !important;
+}
+
+[data-theme="dark"] .edit-modal-box table td,
+[data-theme="dark"] #fullscreen-modal-body table td {
+  background: var(--card-bg, #1e293b) !important;
+  color: var(--text-color, #e2e8f0) !important;
+  border-color: var(--border-color, #334155) !important;
+}
+
+[data-theme="dark"] .edit-modal-box table tr:nth-child(even) td,
+[data-theme="dark"] #fullscreen-modal-body table tr:nth-child(even) td {
+  background: var(--bg-secondary, #1e293b) !important;
+}
+
+[data-theme="dark"] .edit-modal-box table tr:hover td,
+[data-theme="dark"] #fullscreen-modal-body table tr:hover td {
+  background: rgba(26, 77, 58, 0.25) !important;
+}
+
+/* Boutons "shortcut" et Kbd */
+[data-theme="dark"] .shortcut-btn,
+[data-theme="dark"] kbd {
+  background: var(--bg-secondary, #334155) !important;
+  color: var(--text-color, #e2e8f0) !important;
+  border-color: var(--border-color, #475569) !important;
+}
+
+/* Navigation dans les modales */
+[data-theme="dark"] .settings-nav,
+[data-theme="dark"] .settings-nav-btn,
+[data-theme="dark"] .help-nav-btn {
+  background: transparent;
+  color: var(--text-color, #e2e8f0) !important;
+}
+
+/* Zone de danger : contraste en dark */
+[data-theme="dark"] .edit-modal-box code {
+  background: var(--bg-secondary, #334155);
+  color: var(--text-color, #e2e8f0);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+/* Notifications en dark */
+[data-theme="dark"] .notification {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+/* Select generique en dark */
+[data-theme="dark"] select,
+[data-theme="dark"] input[type="text"],
+[data-theme="dark"] input[type="email"],
+[data-theme="dark"] input[type="password"],
+[data-theme="dark"] input[type="number"],
+[data-theme="dark"] textarea {
+  background: var(--bg-input, #1e293b) !important;
+  color: var(--text-color, #e2e8f0) !important;
+  border-color: var(--border-color, #334155) !important;
+}
+
+/* Focus ring lisible en dark */
+[data-theme="dark"] input:focus,
+[data-theme="dark"] select:focus,
+[data-theme="dark"] textarea:focus {
+  outline: 2px solid #3d8b6a;
+  outline-offset: 1px;
+}

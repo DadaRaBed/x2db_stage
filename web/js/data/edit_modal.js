@@ -1,9 +1,7 @@
 // ============================================
-// Data - Edit_Modal
-// Fichier extrait automatiquement depuis app.js
+// MODAL EDITION / AJOUT LIGNE (avec theme sombre)
 // ============================================
 
-// ---------- openEditModal ----------
 function openEditModal(tableName, rowId, rowData, isNew = false) {
   const overlay = document.createElement("div");
   overlay.className = "edit-modal-overlay";
@@ -18,9 +16,10 @@ function openEditModal(tableName, rowId, rowData, isNew = false) {
         ? ""
         : String(rowData[key]);
     formFields += `
-      <div class="form-group">
-        <label for="edit-field-${escapeHtml(key)}">${escapeHtml(key)}</label>
-        <input type="text" id="edit-field-${escapeHtml(key)}" data-column="${escapeHtml(key)}" value="${escapeHtml(value)}" />
+      <div class="form-group" style="margin-bottom: 12px;">
+        <label for="edit-field-${escapeHtml(key)}" style="display: block; font-weight: 600; margin-bottom: 4px; color: var(--text-color, #1a1a2e); font-size: 0.85rem;">${escapeHtml(key)}</label>
+        <input type="text" id="edit-field-${escapeHtml(key)}" data-column="${escapeHtml(key)}" value="${escapeHtml(value)}"
+          style="width: 100%; padding: 0.5rem; border: 1px solid var(--border-color, #cbd5e1); border-radius: 4px; box-sizing: border-box; background: var(--bg-input, #ffffff); color: var(--text-color, #1a1a2e);" />
       </div>
     `;
   });
@@ -28,15 +27,17 @@ function openEditModal(tableName, rowId, rowData, isNew = false) {
   const title = isNew ? "Ajouter une ligne" : `Modifier la ligne #${rowId}`;
 
   overlay.innerHTML = `
-    <div class="edit-modal-box">
-      <h3><i class="fas fa-${isNew ? "plus" : "edit"}" style="color: ${isNew ? "#27ae60" : "#f39c12"};"></i> ${title}</h3>
-      <p style="color: #64748b; font-size: 0.85rem; margin-bottom: 1rem;">
+    <div class="edit-modal-box" style="background: var(--card-bg, #ffffff); color: var(--text-color, #1a1a2e); border-radius: 12px; padding: 24px; max-width: 600px; width: 95%; max-height: 85vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);">
+      <h3 style="margin: 0 0 8px 0; color: var(--text-color, #1a1a2e);">
+        <i class="fas fa-${isNew ? "plus" : "edit"}" style="color: ${isNew ? "#27ae60" : "#f39c12"};"></i> ${title}
+      </h3>
+      <p style="color: var(--text-muted, #64748b); font-size: 0.85rem; margin-bottom: 1rem;">
         Table : <strong>${escapeHtml(tableName)}</strong>
       </p>
       <div id="edit-form-fields">${formFields}</div>
-      <div class="modal-actions">
-        <button class="btn-cancel" id="btn-cancel-edit">Annuler</button>
-        <button class="btn-save" id="btn-save-edit">
+      <div class="modal-actions" style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 1.5rem;">
+        <button class="btn-cancel" id="btn-cancel-edit" style="padding: 0.6rem 1.5rem; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; background: #6c757d; color: white;">Annuler</button>
+        <button class="btn-save" id="btn-save-edit" style="padding: 0.6rem 1.5rem; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; background: #1a4d3a; color: white;">
           <i class="fas fa-save"></i> ${isNew ? "Ajouter" : "Enregistrer"}
         </button>
       </div>
@@ -159,4 +160,3 @@ function openEditModal(tableName, rowId, rowData, isNew = false) {
       }
     });
 }
-

@@ -7,7 +7,7 @@ Toutes les constantes sont definies ici.
 # INFORMATIONS DE L'APPLICATION
 # ============================================================
 APP_NAME = "xl2db"
-APP_VERSION = "1.1"
+APP_VERSION = "1.2"
 APP_DESCRIPTION = "Convertisseur Excel vers SQLite"
 APP_EDITION = "Expert Edition"
 

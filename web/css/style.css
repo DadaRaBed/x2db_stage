@@ -67,6 +67,17 @@
   --shadow-md: 0 4px 20px rgba(0, 0, 0, 0.4);
   --shadow-lg: 0 10px 40px rgba(0, 0, 0, 0.5);
   --shadow-xl: 0 20px 60px rgba(0, 0, 0, 0.6);
+  --bg-color: #0f172a;
+  --bg-secondary: #1e293b;
+  --bg-input: #1e293b;
+  --card-bg: #1e293b;
+  --text-color: #e2e8f0;
+  --text-muted: #94a3b8;
+  --border-color: #334155;
+  --primary-color: #3d8b6a;
+  --success-color: #27ae60;
+  --warning-color: #f39c12;
+  --error-color: #dc3545;
 }
 
 /* ============================================
