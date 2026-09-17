@@ -16,7 +16,7 @@ APP_EDITION = "Expert Edition"
 # ============================================================
 DEVELOPER_NAME = "DadaRaBed"
 DEVELOPER_EMAIL = "nanoonadjah3@gmail.com"
-GITHUB_REPO = "DadaRaBed/xl2db_stage"
+GITHUB_REPO = "DadaRaBed/x2db_stage"
 GITHUB_API_LATEST = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 
 # ============================================================
