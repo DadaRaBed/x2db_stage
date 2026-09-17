@@ -674,6 +674,12 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  setTimeout(() => {
+    if (typeof checkPostUpdateNotification === "function") {
+      checkPostUpdateNotification();
+    }
+  }, 1500);
+
   // ============================================================
   // OPERATIONS SUR LES RESULTATS
   // ============================================================

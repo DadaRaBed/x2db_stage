@@ -231,6 +231,9 @@ class Api:
         return self._database.get_table_rows(
             table_name, file_path, limit, offset, order_by, order_dir
         )
+    
+    def check_pending_update_notification(self):
+        return self._updates.check_pending_update_notification()
 
     def get_distinct_values(self, table_name, column, file_path=None):
         return self._database.get_distinct_values(table_name, column, file_path)

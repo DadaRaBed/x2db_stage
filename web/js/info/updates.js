@@ -127,3 +127,74 @@ async function checkForUpdates() {
     if (closeBtn) closeBtn.onclick = close;
   }
 }
+// ============================================
+// NOTIFICATION POST-MISE A JOUR
+// ============================================
+
+async function checkPostUpdateNotification() {
+  try {
+    await waitForApi();
+    const result =
+      await window.pywebview.api.check_pending_update_notification();
+
+    if (!result || !result.success || !result.just_updated) {
+      return;
+    }
+
+    // Afficher une modale de confirmation
+    showUpdateSuccessModal(result.new_version || "", result.from_version || "");
+  } catch (err) {
+    console.error("[UPDATE] Erreur verification post-MAJ:", err);
+  }
+}
+
+function showUpdateSuccessModal(newVersion, fromVersion) {
+  const overlay = document.createElement("div");
+  overlay.className = "edit-modal-overlay";
+  overlay.style.zIndex = "99998";
+
+  overlay.innerHTML = `
+    <div style="background: var(--card-bg, #ffffff); color: var(--text-color, #1a1a2e); border-radius: 12px; padding: 0; max-width: 480px; width: 90%; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4); overflow: hidden; text-align: center;">
+      <div style="background: linear-gradient(135deg, #1a4d3a, #3d8b6a); color: white; padding: 30px 24px 20px 24px;">
+        <div style="width: 80px; height: 80px; background: rgba(255, 255, 255, 0.2); border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 2.5rem; margin-bottom: 12px;">
+          ✓
+        </div>
+        <h2 style="margin: 0; font-size: 1.5rem; font-weight: 700;">Mise à jour réussie !</h2>
+      </div>
+      <div style="padding: 24px;">
+        <p style="color: var(--text-muted, #64748b); font-size: 1rem; margin-bottom: 16px;">
+          Votre application a été mise à jour avec succès.
+        </p>
+        <div style="background: var(--bg-secondary, #f8fafc); border: 1px solid var(--border-color, #e2e8f0); border-radius: 8px; padding: 16px; margin-bottom: 20px; text-align: left;">
+          <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+            <span style="color: var(--text-muted, #64748b); font-size: 0.9rem;">Ancienne version :</span>
+            <strong style="color: var(--text-color, #1a1a2e); font-size: 0.9rem;">${escapeHtml(fromVersion || "?")}</strong>
+          </div>
+          <div style="display: flex; justify-content: space-between;">
+            <span style="color: var(--text-muted, #64748b); font-size: 0.9rem;">Nouvelle version :</span>
+            <strong style="color: #27ae60; font-size: 0.9rem;">${escapeHtml(newVersion || "?")}</strong>
+          </div>
+        </div>
+        <p style="color: var(--text-muted, #64748b); font-size: 0.85rem; margin-bottom: 20px;">
+          Merci d'utiliser ${escapeHtml("xl2db")} !
+        </p>
+        <button type="button" id="btn-close-success-update" style="width: 100%; padding: 12px; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 1rem; background: #1a4d3a; color: white;">
+          <i class="fas fa-check"></i> Continuer
+        </button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+
+  const close = () => overlay.remove();
+  overlay.querySelector("#btn-close-success-update").onclick = close;
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) close();
+  });
+
+  // Fermeture automatique apres 10 secondes
+  setTimeout(() => {
+    if (overlay.parentNode) close();
+  }, 10000);
+}
